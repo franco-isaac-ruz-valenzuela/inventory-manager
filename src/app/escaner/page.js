@@ -8,6 +8,7 @@ import {
   where,
   getDocs,
   updateDoc,
+  addDoc,
   doc,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -24,6 +25,9 @@ export default function EscanerPage() {
   const [scanHistory, setScanHistory] = useState([]);
   const [manualCode, setManualCode] = useState('');
   const [updating, setUpdating] = useState(false);
+  const [newProductName, setNewProductName] = useState('');
+  const [newProductQty, setNewProductQty] = useState(1);
+  const [creating, setCreating] = useState(false);
 
   const searchProduct = useCallback(async (code) => {
     setScannedCode(code);
@@ -102,6 +106,62 @@ export default function EscanerPage() {
     }
   };
 
+  const handleCreateProduct = async (e) => {
+    e.preventDefault();
+    if (!newProductName.trim() || !scannedCode || creating) return;
+    setCreating(true);
+
+    try {
+      const cleanSku = scannedCode.trim();
+      const cleanName = newProductName.trim();
+      const qty = parseInt(newProductQty) || 0;
+
+      const docRef = await addDoc(collection(db, 'products'), {
+        sku: cleanSku,
+        name: cleanName,
+        quantity: qty,
+        createdAt: serverTimestamp(),
+        lastUpdated: serverTimestamp(),
+        updatedBy: currentUser.uid,
+      });
+
+      await logAction('producto_agregado', currentUser, {
+        sku: cleanSku,
+        productName: cleanName,
+        newValue: qty,
+        description: `Agregó producto escaneado ${cleanSku} (${cleanName}) con stock ${qty}`,
+      });
+
+      await sendNotification(
+        'creado',
+        `${currentUser.displayName || currentUser.email} registró nuevo producto desde el escáner: ${cleanSku} (${cleanName})`,
+        currentUser
+      );
+
+      const createdProduct = {
+        id: docRef.id,
+        sku: cleanSku,
+        name: cleanName,
+        quantity: qty,
+      };
+
+      setProduct(createdProduct);
+      setNotFound(false);
+      setNewProductName('');
+      setNewProductQty(1);
+
+      // Actualizar el historial de escaneos
+      setScanHistory((prev) => [
+        { code: cleanSku, found: true, name: cleanName, time: new Date() },
+        ...prev.slice(1),
+      ]);
+    } catch (err) {
+      console.error('Error registrando producto:', err);
+      alert('Error al guardar el producto en la base de datos');
+    }
+    setCreating(false);
+  };
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -150,14 +210,88 @@ export default function EscanerPage() {
           {scannedCode && (
             <div className="card" style={{ marginBottom: '16px' }}>
               {notFound ? (
-                <div style={{ textAlign: 'center', padding: '16px' }}>
-                  <div style={{ fontSize: '2.5rem', marginBottom: '12px', color: 'var(--danger)' }}>
-                    <i className="bi bi-x-circle-fill"></i>
+                <div style={{ padding: '8px' }}>
+                  <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+                    <div style={{ fontSize: '2.5rem', marginBottom: '8px', color: 'var(--accent-primary)' }}>
+                      <i className="bi bi-upc-scan"></i>
+                    </div>
+                    <div className="scanner-result-sku">{scannedCode}</div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+                      Este código aún no existe en la base de datos.
+                    </p>
                   </div>
-                  <div className="scanner-result-sku">{scannedCode}</div>
-                  <p style={{ color: 'var(--text-secondary)' }}>
-                    Producto no encontrado en el inventario
-                  </p>
+
+                  <form onSubmit={handleCreateProduct} style={{
+                    background: 'var(--bg-glass)',
+                    padding: '20px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-accent)',
+                  }}>
+                    <h4 style={{
+                      fontSize: 'var(--font-size-md)',
+                      fontWeight: 600,
+                      marginBottom: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      color: 'var(--accent-primary)',
+                    }}>
+                      <i className="bi bi-plus-circle-fill"></i> Registrar en Base de Datos
+                    </h4>
+
+                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                      <label className="form-label">Código SKU / Barras</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={scannedCode}
+                        readOnly
+                        style={{ opacity: 0.85, background: 'rgba(255,255,255,0.05)', fontWeight: 600 }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                      <label className="form-label">Nombre del Producto *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Ej: Teclado Mecánico RGB, Arroz 1kg..."
+                        value={newProductName}
+                        onChange={(e) => setNewProductName(e.target.value)}
+                        autoFocus
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '16px' }}>
+                      <label className="form-label">Cantidad Inicial</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={newProductQty}
+                        onChange={(e) => setNewProductQty(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={creating || !newProductName.trim()}
+                      style={{ width: '100%', justifyContent: 'center', gap: '8px' }}
+                    >
+                      {creating ? (
+                        <>
+                          <div className="spinner" style={{ width: '16px', height: '16px' }} />
+                          Guardando en Firestore...
+                        </>
+                      ) : (
+                        <>
+                          <i className="bi bi-cloud-arrow-up-fill"></i> Guardar y Agregar al Inventario
+                        </>
+                      )}
+                    </button>
+                  </form>
                 </div>
               ) : product ? (
                 <div>
