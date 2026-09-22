@@ -1668,7 +1668,7 @@ select.form-input {
 }
 
 /* ============================================
-   SCANNER MODULE
+   SCANNER MODULE (Quagga2)
    ============================================ */
 .scanner-grid {
   display: grid;
@@ -1689,17 +1689,52 @@ select.form-input {
   justify-content: center;
 }
 
-#barcode-reader {
-  width: 100% !important;
-  border-radius: var(--radius-md);
+.quagga-viewport {
+  position: relative;
+  width: 100%;
   overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000;
 }
 
-#barcode-reader video {
+.quagga-viewport video {
   width: 100% !important;
   height: auto !important;
+  display: block;
   border-radius: var(--radius-md);
   object-fit: cover;
+}
+
+.quagga-viewport canvas.drawingBuffer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none;
+}
+
+.scanner-laser-line {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  height: 3px;
+  background: #00d4ff;
+  box-shadow: 0 0 14px 3px rgba(0, 212, 255, 0.85);
+  z-index: 10;
+  border-radius: 2px;
+  animation: scanLaser 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes scanLaser {
+  0% {
+    top: 15%;
+    opacity: 0.9;
+  }
+  100% {
+    top: 85%;
+    opacity: 0.9;
+  }
 }
 
 .scanner-result-sku {
