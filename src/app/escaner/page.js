@@ -111,7 +111,7 @@ export default function EscanerPage() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+      <div className="scanner-grid">
         {/* Left: Scanner */}
         <div>
           <div className="card" style={{ marginBottom: '16px' }}>
