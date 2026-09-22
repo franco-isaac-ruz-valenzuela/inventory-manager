@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { db } from '../../lib/firebase';
 import {
   collection,
@@ -11,13 +11,10 @@ import {
   addDoc,
   doc,
   serverTimestamp,
-  orderBy,
-  limit,
-  onSnapshot,
 } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { logAction } from '../../lib/auditLog';
-import { sendNotification, timeAgo } from '../../lib/notifications';
+import { sendNotification } from '../../lib/notifications';
 import BarcodeScanner from '../../components/BarcodeScanner';
 
 export default function EscanerPage() {
@@ -30,47 +27,7 @@ export default function EscanerPage() {
   const [updating, setUpdating] = useState(false);
   const [newProductName, setNewProductName] = useState('');
   const [newProductQty, setNewProductQty] = useState(1);
-  // Persistir y sincronizar historial de escaneos en tiempo real desde Firestore
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('leker_scan_history');
-      if (saved) {
-        setScanHistory(JSON.parse(saved));
-      }
-    } catch (e) {}
-
-    const q = query(
-      collection(db, 'audit_log'),
-      orderBy('timestamp', 'desc'),
-      limit(60)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const scans = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.action === 'escaneo') {
-          scans.push({
-            id: docSnap.id,
-            code: data.details?.sku || '',
-            name: data.details?.productName && data.details?.productName !== 'No registrado' ? data.details.productName : '',
-            found: data.details?.found !== false,
-            userName: data.userName || 'Usuario',
-            time: data.timestamp?.toDate ? data.timestamp.toDate() : new Date(),
-          });
-        }
-      });
-
-      if (scans.length > 0) {
-        setScanHistory(scans.slice(0, 25));
-        try {
-          localStorage.setItem('leker_scan_history', JSON.stringify(scans.slice(0, 25)));
-        } catch (e) {}
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
+  const [creating, setCreating] = useState(false);
 
   const searchProduct = useCallback(async (code) => {
     setScannedCode(code);
@@ -83,24 +40,22 @@ export default function EscanerPage() {
 
       if (snapshot.empty) {
         setNotFound(true);
-
-        // Registrar SIEMPRE el intento de escaneo en el Log de Auditoría
-        await logAction('escaneo', currentUser, {
-          sku: code,
-          productName: 'No registrado',
-          found: false,
-          description: `Escaneó código ${code} (No registrado)`,
-        });
+        setScanHistory((prev) => [
+          { code, found: false, time: new Date() },
+          ...prev.slice(0, 19),
+        ]);
       } else {
         const docSnap = snapshot.docs[0];
         const prod = { id: docSnap.id, ...docSnap.data() };
         setProduct(prod);
+        setScanHistory((prev) => [
+          { code, found: true, name: prod.name, time: new Date() },
+          ...prev.slice(0, 19),
+        ]);
 
-        // Registrar el escaneo exitoso en el Log de Auditoría
         await logAction('escaneo', currentUser, {
           sku: code,
           productName: prod.name,
-          found: true,
           description: `Escaneó ${code} (${prod.name})`,
         });
       }
@@ -438,71 +393,39 @@ export default function EscanerPage() {
 
           {/* Scan history */}
           <div className="card">
-            <div className="card-title" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <i className="bi bi-clock-history" style={{ color: 'var(--accent-primary)' }}></i> Historial de Escaneos
+            <div className="card-title" style={{ marginBottom: '12px' }}>
+              📋 Historial de Escaneos
             </div>
             {scanHistory.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px' }}>
-                <i className="bi bi-upc-scan" style={{ fontSize: '2rem', display: 'block', marginBottom: '8px', opacity: 0.4 }}></i>
-                Los escaneos del equipo aparecerán aquí y quedarán guardados permanentemente
+                Los escaneos aparecerán aquí
               </div>
             ) : (
-              <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
+              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
                 {scanHistory.map((scan, i) => (
                   <div
-                    key={scan.id || i}
-                    onClick={() => searchProduct(scan.code)}
+                    key={i}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '12px',
-                      padding: '10px 8px',
+                      padding: '8px 0',
                       borderBottom: '1px solid var(--border-color)',
-                      cursor: 'pointer',
-                      borderRadius: 'var(--radius-sm)',
-                      transition: 'background var(--transition-fast)',
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-glass-hover)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    title="Haz clic para volver a cargar este producto"
                   >
-                    {scan.found ? (
-                      <i className="bi bi-check-circle-fill text-success" style={{ fontSize: '1.1rem' }}></i>
-                    ) : (
-                      <i className="bi bi-question-circle-fill text-warning" style={{ fontSize: '1.1rem' }}></i>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <code style={{
-                          color: 'var(--accent-primary)',
-                          fontSize: 'var(--font-size-sm)',
-                          fontWeight: 700,
-                        }}>
-                          {scan.code}
-                        </code>
-                        {scan.userName && (
-                          <span className="badge badge-info" style={{ fontSize: '10px', padding: '1px 6px' }}>
-                            {scan.userName}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{
-                        color: scan.name ? 'var(--text-primary)' : 'var(--text-muted)',
-                        fontSize: 'var(--font-size-sm)',
-                        marginTop: '2px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        {scan.name || (scan.found ? 'Sin nombre' : 'No registrado en catálogo')}
-                      </div>
+                    <span>{scan.found ? '✅' : '❌'}</span>
+                    <div style={{ flex: 1 }}>
+                      <code style={{ color: 'var(--accent-primary)', fontSize: 'var(--font-size-sm)' }}>
+                        {scan.code}
+                      </code>
+                      {scan.name && (
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', marginLeft: '8px' }}>
+                          {scan.name}
+                        </span>
+                      )}
                     </div>
-                    <span style={{
-                      color: 'var(--text-muted)',
-                      fontSize: 'var(--font-size-xs)',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {scan.time ? (scan.time instanceof Date ? scan.time.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '') : ''}
+                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
+                      {scan.time.toLocaleTimeString('es-AR')}
                     </span>
                   </div>
                 ))}

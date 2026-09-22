@@ -42,9 +42,7 @@ export function getActionMessage(action, userName, details) {
     producto_eliminado: `${userName} eliminó el producto ${product}`,
     cantidad_descontada: `${userName} descontó ${details.previousValue - details.newValue} uds de ${product} (${details.previousValue} → ${details.newValue})`,
     cantidad_agregada: `${userName} agregó ${details.newValue - details.previousValue} uds a ${product} (${details.previousValue} → ${details.newValue})`,
-    escaneo: details.found === false
-      ? `${userName} escaneó el código ${details.sku} (No registrado)`
-      : `${userName} escaneó el producto ${product}`,
+    escaneo: `${userName} escaneó el producto ${product}`,
     excel_subido: `${userName} subió un archivo Excel`,
     comparacion_realizada: `${userName} realizó una comparación de inventarios`,
     reporte_descargado: `${userName} descargó un reporte`,
