@@ -74,24 +74,32 @@ export default function DashboardPage() {
       {/* Stats */}
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-icon">📦</div>
+          <div className="stat-icon icon-blue">
+            <i className="bi bi-box-seam-fill"></i>
+          </div>
           <div className="stat-value">{stats.totalProducts}</div>
           <div className="stat-label">Productos totales</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon">⚠️</div>
+          <div className="stat-icon icon-amber">
+            <i className="bi bi-exclamation-triangle-fill"></i>
+          </div>
           <div className="stat-value" style={{ color: stats.lowStock > 0 ? 'var(--warning)' : 'inherit' }}>
             {stats.lowStock}
           </div>
           <div className="stat-label">Stock bajo (≤5 uds)</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon">📊</div>
+          <div className="stat-icon icon-purple">
+            <i className="bi bi-arrow-left-right"></i>
+          </div>
           <div className="stat-value">{stats.sessions}</div>
           <div className="stat-label">Comparaciones realizadas</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon">📋</div>
+          <div className="stat-icon icon-emerald">
+            <i className="bi bi-clock-history"></i>
+          </div>
           <div className="stat-value">{recentActivity.length}</div>
           <div className="stat-label">Actividades recientes</div>
         </div>
@@ -100,13 +108,17 @@ export default function DashboardPage() {
       {/* Activity Feed */}
       <div className="card">
         <div className="card-header">
-          <h2 className="card-title">🔴 Actividad en Vivo</h2>
+          <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <i className="bi bi-broadcast" style={{ color: 'var(--danger)' }}></i> Actividad en Vivo
+          </h2>
           <span className="badge badge-info">Tiempo real</span>
         </div>
 
         {recentActivity.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
+            <div className="empty-state-icon">
+              <i className="bi bi-clipboard2-data"></i>
+            </div>
             <div className="empty-state-title">Sin actividad aún</div>
             <div className="empty-state-text">
               Las acciones del equipo aparecerán aquí en tiempo real
@@ -128,7 +140,7 @@ export default function DashboardPage() {
                     className="activity-icon"
                     style={{ background: `${style.color}15`, color: style.color }}
                   >
-                    {style.icon}
+                    <i className={style.icon}></i>
                   </div>
                   <div className="activity-content">
                     <div className="activity-message">{message}</div>

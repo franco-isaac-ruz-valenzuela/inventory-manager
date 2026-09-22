@@ -56,16 +56,16 @@ export function getActionMessage(action, userName, details) {
  */
 export function getActionStyle(action) {
   const styles = {
-    producto_agregado: { color: '#10b981', icon: '➕', label: 'Agregado' },
-    producto_editado: { color: '#f59e0b', icon: '✏️', label: 'Editado' },
-    producto_eliminado: { color: '#ef4444', icon: '🗑️', label: 'Eliminado' },
-    cantidad_descontada: { color: '#ef4444', icon: '📉', label: 'Descontado' },
-    cantidad_agregada: { color: '#10b981', icon: '📈', label: 'Agregado Stock' },
-    escaneo: { color: '#3b82f6', icon: '📷', label: 'Escaneo' },
-    excel_subido: { color: '#8b5cf6', icon: '📤', label: 'Excel Subido' },
-    comparacion_realizada: { color: '#8b5cf6', icon: '🔄', label: 'Comparación' },
-    reporte_descargado: { color: '#6366f1', icon: '📥', label: 'Reporte' },
+    producto_agregado: { color: '#10b981', icon: 'bi bi-plus-circle-fill', label: 'Agregado' },
+    producto_editado: { color: '#f59e0b', icon: 'bi bi-pencil-square', label: 'Editado' },
+    producto_eliminado: { color: '#ef4444', icon: 'bi bi-trash3-fill', label: 'Eliminado' },
+    cantidad_descontada: { color: '#ef4444', icon: 'bi bi-dash-circle-fill', label: 'Descontado' },
+    cantidad_agregada: { color: '#10b981', icon: 'bi bi-plus-circle-fill', label: 'Agregado Stock' },
+    escaneo: { color: '#3b82f6', icon: 'bi bi-upc-scan', label: 'Escaneo' },
+    excel_subido: { color: '#8b5cf6', icon: 'bi bi-file-earmark-excel-fill', label: 'Excel Subido' },
+    comparacion_realizada: { color: '#8b5cf6', icon: 'bi bi-arrow-left-right', label: 'Comparación' },
+    reporte_descargado: { color: '#6366f1', icon: 'bi bi-download', label: 'Reporte' },
   };
 
-  return styles[action] || { color: '#6b7280', icon: '📋', label: 'Acción' };
+  return styles[action] || { color: '#6b7280', icon: 'bi bi-activity', label: 'Acción' };
 }

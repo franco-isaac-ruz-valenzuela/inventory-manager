@@ -404,7 +404,7 @@ export default function InventarioPage() {
       <div className="toolbar">
         <div className="toolbar-group">
           <div className="search-bar" style={{ minWidth: '280px' }}>
-            <span className="search-bar-icon">🔍</span>
+            <i className="bi bi-search search-bar-icon"></i>
             <input
               type="text"
               placeholder="Buscar por SKU o nombre..."
@@ -414,14 +414,14 @@ export default function InventarioPage() {
           </div>
         </div>
         <div className="toolbar-group">
-          <button className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
-            📤 Importar Excel
+          <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <i className="bi bi-file-earmark-arrow-up"></i> Importar Excel
           </button>
-          <button className="btn btn-secondary" onClick={handleExport}>
-            📥 Exportar Excel
+          <button className="btn btn-secondary" onClick={handleExport} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <i className="bi bi-file-earmark-excel"></i> Exportar Excel
           </button>
-          <button className="btn btn-primary" onClick={openAddModal}>
-            ➕ Agregar Producto
+          <button className="btn btn-primary" onClick={openAddModal} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <i className="bi bi-plus-lg"></i> Agregar Producto
           </button>
         </div>
       </div>
@@ -430,7 +430,9 @@ export default function InventarioPage() {
       {filteredProducts.length === 0 ? (
         <div className="card">
           <div className="empty-state">
-            <div className="empty-state-icon">📦</div>
+            <div className="empty-state-icon">
+              <i className="bi bi-box-seam"></i>
+            </div>
             <div className="empty-state-title">
               {search ? 'Sin resultados' : 'Inventario vacío'}
             </div>
@@ -442,11 +444,11 @@ export default function InventarioPage() {
             </div>
             {!search && (
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
-                <button className="btn btn-primary" onClick={openAddModal}>
-                  ➕ Agregar producto
+                <button className="btn btn-primary" onClick={openAddModal} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="bi bi-plus-lg"></i> Agregar producto
                 </button>
-                <button className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
-                  📤 Importar desde Excel
+                <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="bi bi-file-earmark-arrow-up"></i> Importar desde Excel
                 </button>
               </div>
             )}

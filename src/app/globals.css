@@ -500,8 +500,54 @@ a:hover {
 }
 
 .stat-icon {
-  font-size: 1.5rem;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
   margin-bottom: var(--space-md);
+  transition: all var(--transition-base);
+}
+
+.stat-icon.icon-blue {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.15);
+}
+
+.stat-icon.icon-amber {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  box-shadow: 0 0 16px rgba(251, 191, 36, 0.15);
+}
+
+.stat-icon.icon-purple {
+  background: rgba(167, 139, 250, 0.12);
+  color: #a78bfa;
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  box-shadow: 0 0 16px rgba(167, 139, 250, 0.15);
+}
+
+.stat-icon.icon-emerald {
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.15);
+}
+
+.stat-icon.icon-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.15);
+}
+
+.stat-card:hover .stat-icon {
+  transform: translateY(-2px) scale(1.08);
 }
 
 .stat-value {

@@ -9,15 +9,15 @@ import { timeAgo } from '../../lib/notifications';
 import * as XLSX from '@e965/xlsx';
 
 const actionTypes = [
-  { value: 'all', label: 'Todas', icon: '📋' },
-  { value: 'producto_agregado', label: 'Agregados', icon: '➕' },
-  { value: 'producto_editado', label: 'Editados', icon: '✏️' },
-  { value: 'producto_eliminado', label: 'Eliminados', icon: '🗑️' },
-  { value: 'cantidad_descontada', label: 'Descontados', icon: '📉' },
-  { value: 'cantidad_agregada', label: 'Stock Agregado', icon: '📈' },
-  { value: 'escaneo', label: 'Escaneos', icon: '📷' },
-  { value: 'excel_subido', label: 'Excel', icon: '📤' },
-  { value: 'comparacion_realizada', label: 'Comparaciones', icon: '🔄' },
+  { value: 'all', label: 'Todas', icon: 'bi bi-list-ul' },
+  { value: 'producto_agregado', label: 'Agregados', icon: 'bi bi-plus-circle' },
+  { value: 'producto_editado', label: 'Editados', icon: 'bi bi-pencil-square' },
+  { value: 'producto_eliminado', label: 'Eliminados', icon: 'bi bi-trash3' },
+  { value: 'cantidad_descontada', label: 'Descontados', icon: 'bi bi-dash-circle' },
+  { value: 'cantidad_agregada', label: 'Stock Agregado', icon: 'bi bi-plus-circle-dotted' },
+  { value: 'escaneo', label: 'Escaneos', icon: 'bi bi-upc-scan' },
+  { value: 'excel_subido', label: 'Excel', icon: 'bi bi-file-earmark-excel' },
+  { value: 'comparacion_realizada', label: 'Comparaciones', icon: 'bi bi-arrow-left-right' },
 ];
 
 export default function HistorialPage() {
@@ -120,7 +120,7 @@ export default function HistorialPage() {
       <div className="toolbar">
         <div className="toolbar-group" style={{ flex: 1, flexWrap: 'wrap' }}>
           <div className="search-bar" style={{ minWidth: '240px' }}>
-            <span className="search-bar-icon">🔍</span>
+            <i className="bi bi-search search-bar-icon"></i>
             <input
               type="text"
               placeholder="Buscar por SKU, producto o usuario..."
@@ -143,8 +143,8 @@ export default function HistorialPage() {
           </select>
         </div>
         <div className="toolbar-group">
-          <button className="btn btn-secondary" onClick={handleExportHistory}>
-            📥 Exportar Excel
+          <button className="btn btn-secondary" onClick={handleExportHistory} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <i className="bi bi-file-earmark-excel"></i> Exportar Excel
           </button>
         </div>
       </div>
@@ -156,8 +156,9 @@ export default function HistorialPage() {
             key={type.value}
             className={`filter-chip ${filterAction === type.value ? 'active' : ''}`}
             onClick={() => setFilterAction(type.value)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
-            {type.icon} {type.label}
+            <i className={type.icon}></i> {type.label}
           </button>
         ))}
       </div>
@@ -175,7 +176,9 @@ export default function HistorialPage() {
       {filteredLogs.length === 0 ? (
         <div className="card">
           <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
+            <div className="empty-state-icon">
+              <i className="bi bi-clipboard2-x"></i>
+            </div>
             <div className="empty-state-title">Sin registros</div>
             <div className="empty-state-text">
               {logs.length === 0
@@ -204,7 +207,7 @@ export default function HistorialPage() {
                 <div className="timeline-content">
                   <div className="timeline-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '1rem' }}>{style.icon}</span>
+                      <i className={style.icon} style={{ fontSize: '1.05rem', color: style.color }}></i>
                       <span className="timeline-user">{log.userName}</span>
                       <span
                         className="badge"

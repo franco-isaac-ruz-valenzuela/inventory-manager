@@ -280,26 +280,34 @@ export default function CompararPage() {
           {/* Summary */}
           <div className="stats-grid">
             <div className="stat-card">
-              <div className="stat-icon">📊</div>
+              <div className="stat-icon icon-purple">
+                <i className="bi bi-bar-chart-fill"></i>
+              </div>
               <div className="stat-value">{result.summary.totalDifferences}</div>
               <div className="stat-label">Total diferencias</div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon">🟢</div>
+              <div className="stat-icon icon-emerald">
+                <i className="bi bi-plus-circle-fill"></i>
+              </div>
               <div className="stat-value" style={{ color: 'var(--success)' }}>
                 {result.summary.added}
               </div>
               <div className="stat-label">Productos nuevos</div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon">🔴</div>
+              <div className="stat-icon icon-danger">
+                <i className="bi bi-dash-circle-fill"></i>
+              </div>
               <div className="stat-value" style={{ color: 'var(--danger)' }}>
                 {result.summary.removed}
               </div>
               <div className="stat-label">Productos eliminados</div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon">🟡</div>
+              <div className="stat-icon icon-amber">
+                <i className="bi bi-arrow-repeat"></i>
+              </div>
               <div className="stat-value" style={{ color: 'var(--warning)' }}>
                 {result.summary.changed}
               </div>
@@ -310,16 +318,16 @@ export default function CompararPage() {
           {/* Actions */}
           <div className="toolbar">
             <div className="toolbar-group">
-              <button className="btn btn-secondary" onClick={resetAll}>
-                ← Nueva Comparación
+              <button className="btn btn-secondary" onClick={resetAll} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <i className="bi bi-arrow-left"></i> Nueva Comparación
               </button>
             </div>
             <div className="toolbar-group">
-              <button className="btn btn-success" onClick={handleSaveSession}>
-                💾 Guardar Sesión
+              <button className="btn btn-success" onClick={handleSaveSession} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <i className="bi bi-floppy2-fill"></i> Guardar Sesión
               </button>
-              <button className="btn btn-primary" onClick={handleDownloadReport}>
-                📥 Descargar Reporte Excel
+              <button className="btn btn-primary" onClick={handleDownloadReport} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <i className="bi bi-file-earmark-excel-fill"></i> Descargar Reporte Excel
               </button>
             </div>
           </div>
