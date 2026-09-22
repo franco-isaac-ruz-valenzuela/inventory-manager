@@ -126,8 +126,8 @@ export default function EscanerPage() {
 
           {/* Manual search */}
           <div className="card">
-            <div className="card-title" style={{ marginBottom: '12px' }}>
-              🔍 Búsqueda Manual
+            <div className="card-title" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <i className="bi bi-search" style={{ color: 'var(--accent-primary)' }}></i> Búsqueda Manual
             </div>
             <form onSubmit={handleManualSearch} style={{ display: 'flex', gap: '8px' }}>
               <input
@@ -137,8 +137,8 @@ export default function EscanerPage() {
                 value={manualCode}
                 onChange={(e) => setManualCode(e.target.value)}
               />
-              <button type="submit" className="btn btn-primary">
-                Buscar
+              <button type="submit" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <i className="bi bi-search"></i> Buscar
               </button>
             </form>
           </div>
@@ -151,7 +151,9 @@ export default function EscanerPage() {
             <div className="card" style={{ marginBottom: '16px' }}>
               {notFound ? (
                 <div style={{ textAlign: 'center', padding: '16px' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '12px' }}>❌</div>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '12px', color: 'var(--danger)' }}>
+                    <i className="bi bi-x-circle-fill"></i>
+                  </div>
                   <div className="scanner-result-sku">{scannedCode}</div>
                   <p style={{ color: 'var(--text-secondary)' }}>
                     Producto no encontrado en el inventario
@@ -160,8 +162,8 @@ export default function EscanerPage() {
               ) : product ? (
                 <div>
                   <div style={{ marginBottom: '16px' }}>
-                    <span className="badge badge-success" style={{ marginBottom: '8px' }}>
-                      ✅ Producto encontrado
+                    <span className="badge badge-success" style={{ marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <i className="bi bi-check-circle-fill"></i> Producto encontrado
                     </span>
                     <div className="scanner-result-sku">{product.sku}</div>
                     <h3 style={{ fontSize: 'var(--font-size-lg)', marginBottom: '4px' }}>
