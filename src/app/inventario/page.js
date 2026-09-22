@@ -86,7 +86,7 @@ export default function InventarioPage() {
     e.preventDefault();
     const cleanSku = formData.sku.trim().slice(0, 100);
     const cleanName = formData.name.trim().slice(0, 200);
-    const qty = Math.max(0, parseInt(formData.quantity) || 0);
+    const qty = parseInt(formData.quantity) || 0;
 
     if (!cleanSku || !cleanName) return;
 
@@ -107,18 +107,18 @@ export default function InventarioPage() {
           : 'producto_editado';
 
         await logAction(action, currentUser, {
-          sku: formData.sku,
-          productName: formData.name,
+          sku: cleanSku,
+          productName: cleanName,
           previousValue: prevQty,
           newValue: qty,
-          description: `Editó ${formData.sku} (${formData.name})`,
+          description: `Editó ${cleanSku} (${cleanName})`,
         });
 
         if (qty !== prevQty) {
           const diff = qty - prevQty;
           const msg = diff > 0
-            ? `${currentUser.displayName || currentUser.email} agregó ${diff} uds a ${formData.sku} (${formData.name})`
-            : `${currentUser.displayName || currentUser.email} descontó ${Math.abs(diff)} uds de ${formData.sku} (${formData.name})`;
+            ? `${currentUser.displayName || currentUser.email} agregó ${diff} uds a ${cleanSku} (${cleanName})`
+            : `${currentUser.displayName || currentUser.email} descontó ${Math.abs(diff)} uds de ${cleanSku} (${cleanName})`;
           await sendNotification(diff > 0 ? 'agregado' : 'descuento', msg, currentUser);
         }
       } else {
@@ -178,7 +178,7 @@ export default function InventarioPage() {
   };
 
   const handleQuantityChange = async (product, delta) => {
-    const newQty = Math.max(0, product.quantity + delta);
+    const newQty = (product.quantity || 0) + delta;
     try {
       await updateDoc(doc(db, 'products', product.id), {
         quantity: newQty,
@@ -483,9 +483,23 @@ export default function InventarioPage() {
                     <span style={{
                       fontWeight: 700,
                       fontSize: 'var(--font-size-md)',
-                      color: product.quantity === 0 ? 'var(--danger)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
+                      color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
                     }}>
                       {product.quantity}
+                      {product.quantity < 0 && (
+                        <span style={{
+                          display: 'inline-block',
+                          marginLeft: '8px',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          background: 'var(--danger-bg)',
+                          color: 'var(--danger)',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                        }}>
+                          Faltante
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td>
@@ -493,7 +507,6 @@ export default function InventarioPage() {
                       <button
                         className="quantity-btn minus"
                         onClick={() => handleQuantityChange(product, -1)}
-                        disabled={product.quantity <= 0}
                       >
                         −
                       </button>
@@ -568,12 +581,11 @@ export default function InventarioPage() {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Cantidad</label>
+                  <label className="form-label">Cantidad (permite números negativos para faltantes/déficit)</label>
                   <input
                     type="number"
                     className="form-input"
-                    placeholder="0"
-                    min="0"
+                    placeholder="0 (ej: -3 si hay faltante)"
                     value={formData.quantity}
                     onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                     required

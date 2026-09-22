@@ -64,7 +64,7 @@ export default function EscanerPage() {
     if (!product || updating) return;
     setUpdating(true);
 
-    const newQty = Math.max(0, product.quantity + delta);
+    const newQty = (product.quantity || 0) + delta;
 
     try {
       await updateDoc(doc(db, 'products', product.id), {
@@ -186,12 +186,30 @@ export default function EscanerPage() {
                       <button
                         className="quantity-btn minus"
                         onClick={() => handleQuantityChange(-1)}
-                        disabled={product.quantity <= 0 || updating}
+                        disabled={updating}
                       >
                         −
                       </button>
-                      <div className="quantity-display">
-                        {product.quantity}
+                      <div className="quantity-display" style={{
+                        color: product.quantity < 0 ? 'var(--danger)' : undefined,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                      }}>
+                        <span>{product.quantity}</span>
+                        {product.quantity < 0 && (
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            background: 'var(--danger-bg)',
+                            color: 'var(--danger)',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            marginTop: '2px',
+                          }}>
+                            Faltante
+                          </span>
+                        )}
                       </div>
                       <button
                         className="quantity-btn plus"
@@ -205,14 +223,14 @@ export default function EscanerPage() {
                       <button
                         className="btn btn-danger btn-sm"
                         onClick={() => handleQuantityChange(-5)}
-                        disabled={product.quantity < 5 || updating}
+                        disabled={updating}
                       >
                         -5
                       </button>
                       <button
                         className="btn btn-danger btn-sm"
                         onClick={() => handleQuantityChange(-10)}
-                        disabled={product.quantity < 10 || updating}
+                        disabled={updating}
                       >
                         -10
                       </button>
