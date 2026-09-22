@@ -84,15 +84,19 @@ export default function InventarioPage() {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    const qty = parseInt(formData.quantity) || 0;
+    const cleanSku = formData.sku.trim().slice(0, 100);
+    const cleanName = formData.name.trim().slice(0, 200);
+    const qty = Math.max(0, parseInt(formData.quantity) || 0);
+
+    if (!cleanSku || !cleanName) return;
 
     try {
       if (editProduct) {
         // Editar
         const prevQty = editProduct.quantity;
         await updateDoc(doc(db, 'products', editProduct.id), {
-          sku: formData.sku,
-          name: formData.name,
+          sku: cleanSku,
+          name: cleanName,
           quantity: qty,
           lastUpdated: serverTimestamp(),
           updatedBy: currentUser.uid,
@@ -120,8 +124,8 @@ export default function InventarioPage() {
       } else {
         // Crear
         await addDoc(collection(db, 'products'), {
-          sku: formData.sku,
-          name: formData.name,
+          sku: cleanSku,
+          name: cleanName,
           quantity: qty,
           createdAt: serverTimestamp(),
           lastUpdated: serverTimestamp(),
@@ -129,15 +133,15 @@ export default function InventarioPage() {
         });
 
         await logAction('producto_creado', currentUser, {
-          sku: formData.sku,
-          productName: formData.name,
+          sku: cleanSku,
+          productName: cleanName,
           newValue: qty,
-          description: `Creó producto ${formData.sku} (${formData.name}) con stock ${qty}`,
+          description: `Creó producto ${cleanSku} (${cleanName}) con stock ${qty}`,
         });
 
         await sendNotification(
           'creado',
-          `${currentUser.displayName || currentUser.email} agregó nuevo producto ${formData.sku} (${formData.name})`,
+          `${currentUser.displayName || currentUser.email} agregó nuevo producto ${cleanSku} (${cleanName})`,
           currentUser
         );
       }

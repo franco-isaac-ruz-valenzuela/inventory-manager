@@ -1,0 +1,36 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: verificar si el usuario está autenticado en el sistema
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 1. Catálogo e Inventario de Productos
+    // Solo usuarios autenticados pueden consultar, crear, modificar o eliminar productos
+    match /products/{productId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // 2. Historial de Auditoría (Audit Log) - INMUTABLE
+    // Cualquier usuario autenticado puede leer y registrar una nueva acción (create),
+    // pero está ESTRICTAMENTE PROHIBIDO editar o borrar registros históricos.
+    // Esto garantiza que nadie pueda alterar o borrar la evidencia de descuentos o cambios.
+    match /audit_log/{logId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // 3. Notificaciones colaborativas en tiempo real
+    match /notifications/{notificationId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // 4. Reportes y Sesiones de Comparación de Excel
+    match /comparisons/{comparisonId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

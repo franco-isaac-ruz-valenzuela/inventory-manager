@@ -143,6 +143,13 @@ export function compareInventories(previousData, currentData) {
   };
 }
 
+function sanitizeCell(val) {
+  if (typeof val === 'string' && /^[=+\-@\t\r]/.test(val.trim())) {
+    return `'${val}`;
+  }
+  return val;
+}
+
 /**
  * Genera un archivo Excel con el reporte de diferencias
  */
@@ -154,7 +161,7 @@ export function generateDiffReport(comparisonResult, sessionName = 'Reporte') {
     ['Reporte de Comparación de Inventarios'],
     [''],
     ['Fecha', new Date().toLocaleString('es-AR')],
-    ['Sesión', sessionName],
+    ['Sesión', sanitizeCell(sessionName)],
     [''],
     ['Resumen'],
     ['Total de productos', comparisonResult.summary.total],
@@ -170,8 +177,8 @@ export function generateDiffReport(comparisonResult, sessionName = 'Reporte') {
   // Hoja 2: Diferencias detalladas
   const diffHeaders = ['SKU', 'Nombre', 'Cantidad Anterior', 'Cantidad Actual', 'Diferencia', 'Estado'];
   const diffRows = comparisonResult.differences.map((d) => [
-    d.sku,
-    d.name,
+    sanitizeCell(d.sku),
+    sanitizeCell(d.name),
     d.previousQty,
     d.currentQty,
     d.diff > 0 ? `+${d.diff}` : String(d.diff),
@@ -197,8 +204,8 @@ export function exportInventoryToExcel(products, filename = 'inventario.xlsx') {
   const wb = XLSX.utils.book_new();
   const headers = ['SKU', 'Nombre', 'Cantidad', 'Última Actualización'];
   const rows = products.map((p) => [
-    p.sku,
-    p.name,
+    sanitizeCell(p.sku),
+    sanitizeCell(p.name),
     p.quantity,
     p.lastUpdated?.toDate ? p.lastUpdated.toDate().toLocaleString('es-AR') : '',
   ]);
