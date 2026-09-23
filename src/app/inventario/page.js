@@ -138,6 +138,91 @@ export default function InventarioPage() {
     });
   };
 
+  const renderProductMobileCard = (product, showCategory = false) => {
+    const style = getCategoryStyle(product.category);
+    return (
+      <div key={product.id} className="mobile-product-card">
+        <div className="mpc-top">
+          <code className="mpc-sku">{product.sku}</code>
+          {showCategory && (
+            <span
+              className="category-badge"
+              style={{
+                background: style.bg,
+                color: style.color,
+                border: `1px solid ${style.color}33`,
+              }}
+            >
+              <i className={`bi ${style.icon}`} style={{ fontSize: '10px' }}></i>
+              {(product.category || 'SIN CATEGORÍA').toUpperCase()}
+            </span>
+          )}
+        </div>
+
+        <div className="mpc-name">{product.name}</div>
+
+        <div className="mpc-stock-row">
+          <div className="mpc-stock-info">
+            <span className="mpc-stock-label">Stock actual</span>
+            <div className="mpc-stock-value">
+              <span style={{
+                color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
+                fontWeight: 700,
+                fontSize: '17px',
+              }}>
+                {product.quantity} uds
+              </span>
+              {product.quantity < 0 && (
+                <span className="mpc-deficit-pill">Faltante</span>
+              )}
+            </div>
+          </div>
+
+          <div className="quantity-control mpc-stepper">
+            <button
+              type="button"
+              className="quantity-btn minus"
+              onClick={() => handleQuantityChange(product, -1)}
+              aria-label="Restar 1"
+            >
+              −
+            </button>
+            <div className="quantity-display">
+              {product.quantity}
+            </div>
+            <button
+              type="button"
+              className="quantity-btn plus"
+              onClick={() => handleQuantityChange(product, 1)}
+              aria-label="Sumar 1"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        <div className="mpc-actions">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm mpc-edit-btn"
+            onClick={() => openEditModal(product)}
+          >
+            <i className="bi bi-pencil-square"></i> Editar
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger btn-sm mpc-delete-btn"
+            onClick={() => handleDelete(product)}
+            title="Eliminar producto"
+            aria-label="Eliminar producto"
+          >
+            <i className="bi bi-trash3"></i>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const openAddModal = () => {
     setEditProduct(null);
     setFormData({ sku: '', name: '', quantity: '', category: '' });
@@ -532,28 +617,33 @@ export default function InventarioPage() {
       </div>
 
       {/* Toolbar */}
-      <div className="toolbar">
-        <div className="toolbar-group">
-          <div className="search-bar" style={{ flex: '1 1 200px', minWidth: 0 }}>
-            <i className="bi bi-search search-bar-icon"></i>
-            <input
-              type="text"
-              placeholder="Buscar por SKU, nombre o categoría..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+      <div className="inventory-toolbar">
+        {/* Search Bar */}
+        <div className="search-bar inventory-search">
+          <i className="bi bi-search search-bar-icon"></i>
+          <input
+            type="text"
+            placeholder="Buscar por SKU, nombre o categoría..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={() => setSearch('')}
+              aria-label="Limpiar búsqueda"
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
-          {/* Toggle de Vista: Lista vs Secciones */}
+        {/* Controls Row */}
+        <div className="inventory-controls-row">
           <div className="view-toggle">
             <button
-              className={`view-toggle-btn ${viewMode === 'flat' ? 'active' : ''}`}
-              onClick={() => setViewMode('flat')}
-              title="Vista de lista continua"
-            >
-              <i className="bi bi-list-ul"></i> Lista
-            </button>
-            <button
+              type="button"
               className={`view-toggle-btn ${viewMode === 'grouped' ? 'active' : ''}`}
               onClick={() => {
                 setViewMode('grouped');
@@ -565,19 +655,42 @@ export default function InventarioPage() {
             >
               <i className="bi bi-collection"></i> Secciones
             </button>
+            <button
+              type="button"
+              className={`view-toggle-btn ${viewMode === 'flat' ? 'active' : ''}`}
+              onClick={() => setViewMode('flat')}
+              title="Vista de lista continua"
+            >
+              <i className="bi bi-list-ul"></i> Lista
+            </button>
           </div>
-        </div>
 
-        <div className="toolbar-group">
-          <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-            <i className="bi bi-file-earmark-arrow-up"></i> Importar Excel
-          </button>
-          <button className="btn btn-secondary" onClick={handleExport} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-            <i className="bi bi-file-earmark-excel"></i> Exportar Excel
-          </button>
-          <button className="btn btn-primary" onClick={openAddModal} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-            <i className="bi bi-plus-lg"></i> Agregar Producto
-          </button>
+          <div className="inventory-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-toolbar-action"
+              onClick={() => setShowImportModal(true)}
+            >
+              <i className="bi bi-file-earmark-arrow-up"></i>
+              <span>Importar Excel</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-toolbar-action"
+              onClick={handleExport}
+            >
+              <i className="bi bi-file-earmark-excel"></i>
+              <span>Exportar Excel</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-add-product"
+              onClick={openAddModal}
+            >
+              <i className="bi bi-plus-lg"></i>
+              <span>Agregar Producto</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -661,26 +774,20 @@ export default function InventarioPage() {
                     <div className="category-section-icon" style={{ background: style.bg, color: style.color }}>
                       <i className={`bi ${style.icon}`}></i>
                     </div>
-                    <div>
+                    <div className="category-section-info">
                       <div className="category-section-name">{cat}</div>
+                      <div className="category-section-sub">
+                        {prods.length} {prods.length === 1 ? 'producto' : 'productos'} • {totalUnits} {totalUnits === 1 ? 'unidad' : 'unidades'}
+                      </div>
                     </div>
                   </div>
-                  <div className="category-section-meta">
-                    <div className="category-section-stat">
-                      <span>Productos:</span>
-                      <strong>{prods.length}</strong>
-                    </div>
-                    <div className="category-section-stat">
-                      <span>Stock total:</span>
-                      <strong>{totalUnits}</strong>
-                    </div>
-                    <i className={`bi bi-chevron-down category-section-chevron ${isOpen ? 'open' : ''}`}></i>
-                  </div>
+                  <i className={`bi bi-chevron-down category-section-chevron ${isOpen ? 'open' : ''}`}></i>
                 </div>
 
                 <div className={`category-section-body ${isOpen ? 'open' : ''}`}>
-                  <div className="table-container">
-                    <table className="table responsive-table">
+                  {/* Desktop Table View */}
+                  <div className="table-container desktop-only">
+                    <table className="table">
                       <thead>
                         <tr>
                           <th>SKU</th>
@@ -693,7 +800,7 @@ export default function InventarioPage() {
                       <tbody>
                         {prods.map((product) => (
                           <tr key={product.id}>
-                            <td className="cell-sku" data-label="SKU">
+                            <td>
                               <code style={{
                                 background: 'rgba(0, 212, 255, 0.1)',
                                 padding: '2px 8px',
@@ -704,8 +811,8 @@ export default function InventarioPage() {
                                 {product.sku}
                               </code>
                             </td>
-                            <td className="cell-name" data-label="Producto">{product.name}</td>
-                            <td className="cell-qty" data-label="Cantidad">
+                            <td>{product.name}</td>
+                            <td>
                               <span style={{
                                 fontWeight: 700,
                                 fontSize: 'var(--font-size-md)',
@@ -728,7 +835,7 @@ export default function InventarioPage() {
                                 )}
                               </span>
                             </td>
-                            <td className="cell-stepper" data-label="Ajuste">
+                            <td>
                               <div className="quantity-control">
                                 <button
                                   className="quantity-btn minus"
@@ -747,7 +854,7 @@ export default function InventarioPage() {
                                 </button>
                               </div>
                             </td>
-                            <td className="cell-actions" data-label="Acciones">
+                            <td>
                               <div style={{ display: 'flex', gap: '8px' }}>
                                 <button
                                   className="btn btn-secondary btn-sm"
@@ -768,6 +875,11 @@ export default function InventarioPage() {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Mobile Cards View */}
+                  <div className="mobile-cards-list mobile-only">
+                    {prods.map((product) => renderProductMobileCard(product, false))}
+                  </div>
                 </div>
               </div>
             );
@@ -775,111 +887,119 @@ export default function InventarioPage() {
         </div>
       ) : (
         /* ================= VISTA TABLA PLANA ================= */
-        <div className="table-container">
-          <table className="table responsive-table">
-            <thead>
-              <tr>
-                <th>SKU</th>
-                <th>Nombre</th>
-                <th>Categoría</th>
-                <th>Cantidad</th>
-                <th>Ajuste Rápido</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((product) => {
-                const style = getCategoryStyle(product.category);
-                return (
-                  <tr key={product.id}>
-                    <td className="cell-sku" data-label="SKU">
-                      <code style={{
-                        background: 'rgba(0, 212, 255, 0.1)',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        color: 'var(--accent-primary)',
-                        fontSize: 'var(--font-size-sm)',
-                      }}>
-                        {product.sku}
-                      </code>
-                    </td>
-                    <td className="cell-name" data-label="Producto">{product.name}</td>
-                    <td className="cell-cat" data-label="Categoría">
-                      <span
-                        className="category-badge"
-                        style={{
-                          background: style.bg,
-                          color: style.color,
-                          border: `1px solid ${style.color}33`,
-                        }}
-                      >
-                        <i className={`bi ${style.icon}`} style={{ fontSize: '10px' }}></i>
-                        {(product.category || 'SIN CATEGORÍA').toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="cell-qty" data-label="Cantidad">
-                      <span style={{
-                        fontWeight: 700,
-                        fontSize: 'var(--font-size-md)',
-                        color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
-                      }}>
-                        {product.quantity}
-                        {product.quantity < 0 && (
-                          <span style={{
-                            display: 'inline-block',
-                            marginLeft: '8px',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            background: 'var(--danger-bg)',
-                            color: 'var(--danger)',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                          }}>
-                            Faltante
-                          </span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="cell-stepper" data-label="Ajuste">
-                      <div className="quantity-control">
-                        <button
-                          className="quantity-btn minus"
-                          onClick={() => handleQuantityChange(product, -1)}
+        <div>
+          {/* Desktop Table View */}
+          <div className="table-container desktop-only">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Nombre</th>
+                  <th>Categoría</th>
+                  <th>Cantidad</th>
+                  <th>Ajuste Rápido</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProducts.map((product) => {
+                  const style = getCategoryStyle(product.category);
+                  return (
+                    <tr key={product.id}>
+                      <td>
+                        <code style={{
+                          background: 'rgba(0, 212, 255, 0.1)',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          color: 'var(--accent-primary)',
+                          fontSize: 'var(--font-size-sm)',
+                        }}>
+                          {product.sku}
+                        </code>
+                      </td>
+                      <td>{product.name}</td>
+                      <td>
+                        <span
+                          className="category-badge"
+                          style={{
+                            background: style.bg,
+                            color: style.color,
+                            border: `1px solid ${style.color}33`,
+                          }}
                         >
-                          −
-                        </button>
-                        <div className="quantity-display">
+                          <i className={`bi ${style.icon}`} style={{ fontSize: '10px' }}></i>
+                          {(product.category || 'SIN CATEGORÍA').toUpperCase()}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{
+                          fontWeight: 700,
+                          fontSize: 'var(--font-size-md)',
+                          color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
+                        }}>
                           {product.quantity}
+                          {product.quantity < 0 && (
+                            <span style={{
+                              display: 'inline-block',
+                              marginLeft: '8px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              background: 'var(--danger-bg)',
+                              color: 'var(--danger)',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                            }}>
+                              Faltante
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="quantity-control">
+                          <button
+                            className="quantity-btn minus"
+                            onClick={() => handleQuantityChange(product, -1)}
+                          >
+                            −
+                          </button>
+                          <div className="quantity-display">
+                            {product.quantity}
+                          </div>
+                          <button
+                            className="quantity-btn plus"
+                            onClick={() => handleQuantityChange(product, 1)}
+                          >
+                            +
+                          </button>
                         </div>
-                        <button
-                          className="quantity-btn plus"
-                          onClick={() => handleQuantityChange(product, 1)}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </td>
-                    <td className="cell-actions" data-label="Acciones">
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => openEditModal(product)}
-                        >
-                          ✏️ Editar
-                        </button>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          onClick={() => handleDelete(product)}
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => openEditModal(product)}
+                          >
+                            ✏️ Editar
+                          </button>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDelete(product)}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Cards View */}
+          <div className="mobile-cards-list mobile-only">
+            {filteredProducts.map((product) => renderProductMobileCard(product, true))}
+          </div>
         </div>
       )}
 
