@@ -57,8 +57,9 @@ function AppContent({ children }) {
           <button
             className="mobile-menu-btn"
             onClick={() => setSidebarOpen(!sidebarOpen)}
+            aria-label="Abrir menú de navegación"
           >
-            ☰
+            <i className="bi bi-list" style={{ fontSize: '1.4rem' }}></i>
           </button>
           <div className="topbar-brand">
             <img

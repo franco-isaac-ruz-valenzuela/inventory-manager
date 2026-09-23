@@ -189,15 +189,16 @@ export default function EscanerPage() {
             <div className="card-title" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <i className="bi bi-search" style={{ color: 'var(--accent-primary)' }}></i> Búsqueda Manual
             </div>
-            <form onSubmit={handleManualSearch} style={{ display: 'flex', gap: '8px' }}>
+            <form onSubmit={handleManualSearch} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <input
                 type="text"
                 className="form-input"
                 placeholder="Ingresa el SKU manualmente..."
                 value={manualCode}
                 onChange={(e) => setManualCode(e.target.value)}
+                style={{ flex: '1 1 180px', minWidth: 0 }}
               />
-              <button type="submit" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <button type="submit" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '44px' }}>
                 <i className="bi bi-search"></i> Buscar
               </button>
             </form>

@@ -3,6 +3,14 @@ import AppShell from '../components/AppShell';
 
 export const dynamic = 'force-dynamic';
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
+  themeColor: '#06060f',
+};
+
 export const metadata = {
   title: 'LEKER — Sistema de Gestión de Inventarios',
   description: 'LEKER: Sistema web para gestión de inventarios con comparación de Excel, escáner de códigos de barras y reportes en tiempo real.',
@@ -14,6 +22,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      </head>
       <body>
         <AppShell>{children}</AppShell>
       </body>

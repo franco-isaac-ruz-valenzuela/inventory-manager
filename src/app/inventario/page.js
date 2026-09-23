@@ -534,7 +534,7 @@ export default function InventarioPage() {
       {/* Toolbar */}
       <div className="toolbar">
         <div className="toolbar-group">
-          <div className="search-bar" style={{ minWidth: '280px' }}>
+          <div className="search-bar" style={{ flex: '1 1 200px', minWidth: 0 }}>
             <i className="bi bi-search search-bar-icon"></i>
             <input
               type="text"
@@ -680,7 +680,7 @@ export default function InventarioPage() {
 
                 <div className={`category-section-body ${isOpen ? 'open' : ''}`}>
                   <div className="table-container">
-                    <table className="table">
+                    <table className="table responsive-table">
                       <thead>
                         <tr>
                           <th>SKU</th>
@@ -693,7 +693,7 @@ export default function InventarioPage() {
                       <tbody>
                         {prods.map((product) => (
                           <tr key={product.id}>
-                            <td>
+                            <td className="cell-sku" data-label="SKU">
                               <code style={{
                                 background: 'rgba(0, 212, 255, 0.1)',
                                 padding: '2px 8px',
@@ -704,8 +704,8 @@ export default function InventarioPage() {
                                 {product.sku}
                               </code>
                             </td>
-                            <td>{product.name}</td>
-                            <td>
+                            <td className="cell-name" data-label="Producto">{product.name}</td>
+                            <td className="cell-qty" data-label="Cantidad">
                               <span style={{
                                 fontWeight: 700,
                                 fontSize: 'var(--font-size-md)',
@@ -728,7 +728,7 @@ export default function InventarioPage() {
                                 )}
                               </span>
                             </td>
-                            <td>
+                            <td className="cell-stepper" data-label="Ajuste">
                               <div className="quantity-control">
                                 <button
                                   className="quantity-btn minus"
@@ -747,7 +747,7 @@ export default function InventarioPage() {
                                 </button>
                               </div>
                             </td>
-                            <td>
+                            <td className="cell-actions" data-label="Acciones">
                               <div style={{ display: 'flex', gap: '8px' }}>
                                 <button
                                   className="btn btn-secondary btn-sm"
@@ -776,7 +776,7 @@ export default function InventarioPage() {
       ) : (
         /* ================= VISTA TABLA PLANA ================= */
         <div className="table-container">
-          <table className="table">
+          <table className="table responsive-table">
             <thead>
               <tr>
                 <th>SKU</th>
@@ -792,7 +792,7 @@ export default function InventarioPage() {
                 const style = getCategoryStyle(product.category);
                 return (
                   <tr key={product.id}>
-                    <td>
+                    <td className="cell-sku" data-label="SKU">
                       <code style={{
                         background: 'rgba(0, 212, 255, 0.1)',
                         padding: '2px 8px',
@@ -803,8 +803,8 @@ export default function InventarioPage() {
                         {product.sku}
                       </code>
                     </td>
-                    <td>{product.name}</td>
-                    <td>
+                    <td className="cell-name" data-label="Producto">{product.name}</td>
+                    <td className="cell-cat" data-label="Categoría">
                       <span
                         className="category-badge"
                         style={{
@@ -817,7 +817,7 @@ export default function InventarioPage() {
                         {(product.category || 'SIN CATEGORÍA').toUpperCase()}
                       </span>
                     </td>
-                    <td>
+                    <td className="cell-qty" data-label="Cantidad">
                       <span style={{
                         fontWeight: 700,
                         fontSize: 'var(--font-size-md)',
@@ -840,7 +840,7 @@ export default function InventarioPage() {
                         )}
                       </span>
                     </td>
-                    <td>
+                    <td className="cell-stepper" data-label="Ajuste">
                       <div className="quantity-control">
                         <button
                           className="quantity-btn minus"
@@ -859,7 +859,7 @@ export default function InventarioPage() {
                         </button>
                       </div>
                     </td>
-                    <td>
+                    <td className="cell-actions" data-label="Acciones">
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button
                           className="btn btn-secondary btn-sm"

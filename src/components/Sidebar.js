@@ -39,8 +39,17 @@ export default function Sidebar({ isOpen, onClose }) {
       />
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
-          <img src="/logo.jpg" alt="LEKER" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />
-          <span className="sidebar-logo-text">LEKER Inventarios</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+            <img src="/logo.jpg" alt="LEKER" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />
+            <span className="sidebar-logo-text">LEKER Inventarios</span>
+          </div>
+          <button
+            className="sidebar-close-btn"
+            onClick={onClose}
+            aria-label="Cerrar menú"
+          >
+            ✕
+          </button>
         </div>
 
         <nav className="sidebar-nav">
