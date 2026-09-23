@@ -22,6 +22,7 @@ import {
   parseExcelFile,
   detectColumns,
   normalizeData,
+  consolidateDuplicates,
 } from '../../lib/excelUtils';
 
 export default function InventarioPage() {
@@ -43,11 +44,12 @@ export default function InventarioPage() {
   const [importFile, setImportFile] = useState(null);
   const [importRawData, setImportRawData] = useState([]);
   const [importCols, setImportCols] = useState(null);
-  const [importMode, setImportMode] = useState('upsert'); // upsert | only_new | replace
+  const [importMode, setImportMode] = useState('upsert'); // upsert | only_new | replace | add_stock
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
+  const [consolidationInfo, setConsolidationInfo] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -314,6 +316,18 @@ export default function InventarioPage() {
     if (file) handleFileChange(file);
   };
 
+  // Auto-consolidar duplicados cuando cambian los datos o columnas
+  const getConsolidatedPreview = () => {
+    if (!importRawData.length || !importCols?.sku || !importCols?.quantity) return null;
+    try {
+      const normalized = normalizeData(importRawData, importCols);
+      const result = consolidateDuplicates(normalized);
+      return result;
+    } catch {
+      return null;
+    }
+  };
+
   const handleExecuteImport = async () => {
     if (!importCols?.sku || !importCols?.quantity) {
       setImportError('Debes seleccionar al menos las columnas de SKU y Cantidad.');
@@ -324,9 +338,22 @@ export default function InventarioPage() {
     setImportProgress('Normalizando datos...');
     setImportError('');
     setImportSuccess('');
+    setConsolidationInfo(null);
 
     try {
-      const normalized = normalizeData(importRawData, importCols);
+      const rawNormalized = normalizeData(importRawData, importCols);
+
+      // Consolidar duplicados del Excel (sumar SKUs repetidos)
+      const { consolidated: normalized, duplicatesFound, duplicateDetails } = consolidateDuplicates(rawNormalized);
+
+      if (duplicatesFound > 0) {
+        setConsolidationInfo({
+          count: duplicatesFound,
+          originalRows: rawNormalized.length,
+          consolidatedRows: normalized.length,
+          details: duplicateDetails,
+        });
+      }
 
       if (importMode === 'replace') {
         setImportProgress('Eliminando inventario anterior...');
@@ -348,6 +375,7 @@ export default function InventarioPage() {
       let inserted = 0;
       let updated = 0;
       let skipped = 0;
+      let summed = 0;
 
       for (let i = 0; i < normalized.length; i += BATCH_SIZE) {
         const chunk = normalized.slice(i, i + BATCH_SIZE);
@@ -385,6 +413,34 @@ export default function InventarioPage() {
               updatedBy: currentUser.uid,
             });
             inserted++;
+          } else if (importMode === 'add_stock') {
+            // Sumar cantidades a lo existente
+            if (existing) {
+              const newQty = (existing.quantity || 0) + item.quantity;
+              const updatePayload = {
+                quantity: newQty,
+                lastUpdated: serverTimestamp(),
+                updatedBy: currentUser.uid,
+              };
+              if (item.name && item.name.length > (existing.name || '').length) {
+                updatePayload.name = item.name;
+              }
+              if (item.category) updatePayload.category = item.category;
+              batch.update(doc(db, 'products', existing.id), updatePayload);
+              summed++;
+            } else {
+              const newRef = doc(collection(db, 'products'));
+              batch.set(newRef, {
+                sku: item.sku,
+                name: item.name || item.sku,
+                category: item.category || 'SIN CATEGORÍA',
+                quantity: item.quantity,
+                createdAt: serverTimestamp(),
+                lastUpdated: serverTimestamp(),
+                updatedBy: currentUser.uid,
+              });
+              inserted++;
+            }
           } else {
             // upsert (actualizar o crear)
             if (existing) {
@@ -418,6 +474,8 @@ export default function InventarioPage() {
       }
 
       // Registro en auditoría y notificación
+      const dupMsg = duplicatesFound > 0 ? ` (${duplicatesFound} duplicados consolidados)` : '';
+      const sumMsg = summed > 0 ? `, ${summed} sumados` : '';
       await logAction('excel_subido', currentUser, {
         fileName: importFile.name,
         mode: importMode,
@@ -425,16 +483,18 @@ export default function InventarioPage() {
         inserted,
         updated,
         skipped,
-        description: `Importó Excel "${importFile.name}": ${inserted} creados, ${updated} actualizados${skipped ? `, ${skipped} omitidos` : ''}.`,
+        summed,
+        duplicatesConsolidated: duplicatesFound,
+        description: `Importó Excel "${importFile.name}": ${inserted} creados, ${updated} actualizados${sumMsg}${skipped ? `, ${skipped} omitidos` : ''}${dupMsg}.`,
       });
 
       await sendNotification(
         'info',
-        `📥 ${currentUser.displayName || currentUser.email} importó ${normalized.length} productos desde Excel (${inserted} creados, ${updated} actualizados)`,
+        `📥 ${currentUser.displayName || currentUser.email} importó ${normalized.length} productos desde Excel (${inserted} creados, ${updated} actualizados${sumMsg})`,
         currentUser
       );
 
-      setImportSuccess(`¡Importación completada! ${inserted} productos creados, ${updated} actualizados${skipped ? `, ${skipped} omitidos` : ''}.`);
+      setImportSuccess(`¡Importación completada! ${inserted} creados, ${updated} actualizados${sumMsg}${skipped ? `, ${skipped} omitidos` : ''}${dupMsg}.`);
       setTimeout(() => {
         setShowImportModal(false);
         setImportFile(null);
@@ -442,7 +502,8 @@ export default function InventarioPage() {
         setImportCols(null);
         setImportSuccess('');
         setImportProgress('');
-      }, 1800);
+        setConsolidationInfo(null);
+      }, 2500);
     } catch (err) {
       console.error('Error importando:', err);
       setImportError(`Error al importar: ${err.message}`);
@@ -1084,6 +1145,55 @@ export default function InventarioPage() {
                     </div>
                   </div>
 
+                  {/* Consolidation Info Banner */}
+                  {(() => {
+                    const preview = getConsolidatedPreview();
+                    if (preview && preview.duplicatesFound > 0) {
+                      return (
+                        <div style={{
+                          background: 'rgba(124, 58, 237, 0.08)',
+                          border: '1px solid rgba(124, 58, 237, 0.3)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '12px 16px',
+                          marginBottom: '16px',
+                          fontSize: '13px',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '1.2rem' }}>🔄</span>
+                            <strong style={{ color: '#a78bfa' }}>
+                              {preview.duplicatesFound} SKU(s) duplicados detectados — se consolidarán automáticamente
+                            </strong>
+                          </div>
+                          <div style={{ color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                            {preview.originalRows} filas del Excel → {preview.consolidatedRows} productos únicos (cantidades sumadas)
+                          </div>
+                          {preview.duplicateDetails.length > 0 && (
+                            <details style={{ marginTop: '6px' }}>
+                              <summary style={{ cursor: 'pointer', color: '#a78bfa', fontWeight: 500 }}>
+                                Ver detalle de duplicados
+                              </summary>
+                              <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto' }}>
+                                {preview.duplicateDetails.map((d, idx) => (
+                                  <div key={idx} style={{
+                                    padding: '4px 0',
+                                    borderBottom: '1px solid var(--border-color)',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    fontSize: '12px',
+                                  }}>
+                                    <span><code>{d.sku}</code> — {d.name}</span>
+                                    <span style={{ color: 'var(--success)', fontWeight: 600 }}>+{d.addedQty} → Total: {d.totalQty}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   {/* Import Mode Options */}
                   <div style={{
                     background: 'var(--bg-card)',
@@ -1096,39 +1206,56 @@ export default function InventarioPage() {
                       📋 Modo de Importación:
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
                         <input
                           type="radio"
                           name="importMode"
                           value="upsert"
                           checked={importMode === 'upsert'}
                           onChange={(e) => setImportMode(e.target.value)}
+                          style={{ marginTop: '3px' }}
                         />
                         <span>
                           <strong>Actualizar y agregar nuevos (Recomendado)</strong>: Si el SKU ya existe, actualiza su stock y categoría; si no existe, lo crea.
                         </span>
                       </label>
 
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
+                        <input
+                          type="radio"
+                          name="importMode"
+                          value="add_stock"
+                          checked={importMode === 'add_stock'}
+                          onChange={(e) => setImportMode(e.target.value)}
+                          style={{ marginTop: '3px' }}
+                        />
+                        <span>
+                          <strong style={{ color: 'var(--success)' }}>➕ Sumar cantidades al stock existente</strong>: Si el SKU ya existe, <u>suma</u> la cantidad del Excel al stock actual (ej: tenés 3 + importás 5 = 8). Si no existe, lo crea.
+                        </span>
+                      </label>
+
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
                         <input
                           type="radio"
                           name="importMode"
                           value="only_new"
                           checked={importMode === 'only_new'}
                           onChange={(e) => setImportMode(e.target.value)}
+                          style={{ marginTop: '3px' }}
                         />
                         <span>
                           <strong>Solo agregar nuevos</strong>: Solo crea productos nuevos; no modifica los que ya estén registrados.
                         </span>
                       </label>
 
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
                         <input
                           type="radio"
                           name="importMode"
                           value="replace"
                           checked={importMode === 'replace'}
                           onChange={(e) => setImportMode(e.target.value)}
+                          style={{ marginTop: '3px' }}
                         />
                         <span style={{ color: 'var(--warning)' }}>
                           <strong>Reemplazar todo el inventario</strong>: Elimina los productos actuales e inserta los del Excel.

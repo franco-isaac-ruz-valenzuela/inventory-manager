@@ -76,8 +76,8 @@ export default function ReportesPage() {
         <div style={{ display: 'grid', gap: '16px' }}>
           {sessions.map((session) => (
             <div key={session.id} className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                <div style={{ flex: '1 1 250px', minWidth: 0 }}>
                   <h3 style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, marginBottom: '4px' }}>
                     {session.name}
                   </h3>
@@ -94,14 +94,14 @@ export default function ReportesPage() {
                     </span>
                   </div>
                   {session.summary && (
-                    <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
                       <span className="badge badge-success">+{session.summary.added} nuevos</span>
                       <span className="badge badge-danger">-{session.summary.removed} eliminados</span>
                       <span className="badge badge-warning">{session.summary.changed} cambiados</span>
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                   <button
                     className="btn btn-sm btn-secondary"
                     onClick={() => setSelectedSession(
