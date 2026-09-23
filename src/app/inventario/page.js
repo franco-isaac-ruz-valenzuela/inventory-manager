@@ -31,7 +31,12 @@ export default function InventarioPage() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
-  const [formData, setFormData] = useState({ sku: '', name: '', quantity: '' });
+  const [formData, setFormData] = useState({ sku: '', name: '', quantity: '', category: '' });
+
+  // Estados para Categorías
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [viewMode, setViewMode] = useState('flat'); // 'flat' | 'grouped'
+  const [openSections, setOpenSections] = useState(new Set());
 
   // Estados para Importar Excel
   const [showImportModal, setShowImportModal] = useState(false);
@@ -58,17 +63,82 @@ export default function InventarioPage() {
     return () => unsubscribe();
   }, []);
 
+  // Extraer categorías únicas con conteos
+  const categoryCounts = products.reduce((acc, p) => {
+    const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
+    acc[cat] = (acc[cat] || 0) + 1;
+    return acc;
+  }, {});
+
+  const categories = Object.keys(categoryCounts).sort((a, b) => {
+    if (a === 'SIN CATEGORÍA') return 1;
+    if (b === 'SIN CATEGORÍA') return -1;
+    return a.localeCompare(b);
+  });
+
+  // Abrir todas las secciones por defecto cuando hay categorías
+  useEffect(() => {
+    if (categories.length > 0 && openSections.size === 0) {
+      setOpenSections(new Set(categories));
+    }
+  }, [products]);
+
+  // Colores asignados por categoría
+  const CATEGORY_COLORS = {
+    'ONDULADAS': { bg: 'rgba(0, 212, 255, 0.12)', color: '#00d4ff', icon: 'bi-water' },
+    'GRECA': { bg: 'rgba(124, 58, 237, 0.12)', color: '#8b5cf6', icon: 'bi-layers' },
+    'ALVEOLAR': { bg: 'rgba(16, 185, 129, 0.12)', color: '#10b981', icon: 'bi-grid-3x3' },
+    'PERFILES': { bg: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', icon: 'bi-rulers' },
+    'INDUSTRIAL': { bg: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', icon: 'bi-building' },
+    'PACK': { bg: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6', icon: 'bi-box2' },
+    'COMPACTO': { bg: 'rgba(236, 72, 153, 0.12)', color: '#ec4899', icon: 'bi-square' },
+    'ACCESORIOS': { bg: 'rgba(168, 85, 247, 0.12)', color: '#a855f7', icon: 'bi-wrench' },
+    'ROLLO': { bg: 'rgba(20, 184, 166, 0.12)', color: '#14b8a6', icon: 'bi-arrow-repeat' },
+    'MATERIAS PRIMAS': { bg: 'rgba(251, 146, 60, 0.12)', color: '#fb923c', icon: 'bi-moisture' },
+    'OTROS': { bg: 'rgba(148, 163, 184, 0.12)', color: '#94a3b8', icon: 'bi-three-dots' },
+    'PLANCHAS METALICAS': { bg: 'rgba(100, 116, 139, 0.12)', color: '#64748b', icon: 'bi-subtract' },
+    'PINTURAS Y ADHESIVOS': { bg: 'rgba(217, 70, 239, 0.12)', color: '#d946ef', icon: 'bi-paint-bucket' },
+    'CANALETAS Y ACCESORIOS': { bg: 'rgba(34, 197, 94, 0.12)', color: '#22c55e', icon: 'bi-funnel' },
+    'SIN CATEGORÍA': { bg: 'rgba(255, 255, 255, 0.06)', color: '#94a3b8', icon: 'bi-question-circle' },
+  };
+
+  const getCategoryStyle = (cat) => {
+    const upper = (cat || '').toUpperCase();
+    return CATEGORY_COLORS[upper] || CATEGORY_COLORS['SIN CATEGORÍA'];
+  };
+
   const filteredProducts = products.filter((p) => {
     const s = search.toLowerCase();
-    return (
+    const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
+    const matchesSearch =
       p.sku?.toLowerCase().includes(s) ||
-      p.name?.toLowerCase().includes(s)
-    );
+      p.name?.toLowerCase().includes(s) ||
+      cat.toLowerCase().includes(s);
+    const matchesCategory =
+      selectedCategory === 'all' || cat === selectedCategory;
+    return matchesSearch && matchesCategory;
   });
+
+  // Agrupación por categoría para vista agrupada
+  const groupedProducts = {};
+  filteredProducts.forEach((p) => {
+    const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
+    if (!groupedProducts[cat]) groupedProducts[cat] = [];
+    groupedProducts[cat].push(p);
+  });
+
+  const toggleSection = (cat) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
 
   const openAddModal = () => {
     setEditProduct(null);
-    setFormData({ sku: '', name: '', quantity: '' });
+    setFormData({ sku: '', name: '', quantity: '', category: '' });
     setShowModal(true);
   };
 
@@ -78,6 +148,7 @@ export default function InventarioPage() {
       sku: product.sku,
       name: product.name,
       quantity: String(product.quantity),
+      category: product.category || '',
     });
     setShowModal(true);
   };
@@ -86,6 +157,7 @@ export default function InventarioPage() {
     e.preventDefault();
     const cleanSku = formData.sku.trim().slice(0, 100);
     const cleanName = formData.name.trim().slice(0, 200);
+    const cleanCategory = (formData.category || 'SIN CATEGORÍA').trim().toUpperCase();
     const qty = parseInt(formData.quantity) || 0;
 
     if (!cleanSku || !cleanName) return;
@@ -97,6 +169,7 @@ export default function InventarioPage() {
         await updateDoc(doc(db, 'products', editProduct.id), {
           sku: cleanSku,
           name: cleanName,
+          category: cleanCategory,
           quantity: qty,
           lastUpdated: serverTimestamp(),
           updatedBy: currentUser.uid,
@@ -109,6 +182,7 @@ export default function InventarioPage() {
         await logAction(action, currentUser, {
           sku: cleanSku,
           productName: cleanName,
+          category: cleanCategory,
           previousValue: prevQty,
           newValue: qty,
           description: `Editó ${cleanSku} (${cleanName})`,
@@ -126,6 +200,7 @@ export default function InventarioPage() {
         await addDoc(collection(db, 'products'), {
           sku: cleanSku,
           name: cleanName,
+          category: cleanCategory,
           quantity: qty,
           createdAt: serverTimestamp(),
           lastUpdated: serverTimestamp(),
@@ -135,6 +210,7 @@ export default function InventarioPage() {
         await logAction('producto_creado', currentUser, {
           sku: cleanSku,
           productName: cleanName,
+          category: cleanCategory,
           newValue: qty,
           description: `Creó producto ${cleanSku} (${cleanName}) con stock ${qty}`,
         });
@@ -245,41 +321,30 @@ export default function InventarioPage() {
     }
 
     setImporting(true);
+    setImportProgress('Normalizando datos...');
     setImportError('');
-    setImportProgress('Procesando datos del archivo...');
+    setImportSuccess('');
 
     try {
-      const normalized = normalizeData(importRawData, importCols).filter(
-        (item) => item.sku && item.sku.length > 0
-      );
+      const normalized = normalizeData(importRawData, importCols);
 
-      if (normalized.length === 0) {
-        throw new Error('No se encontraron filas válidas con SKU en el archivo.');
-      }
-
-      setImportProgress(`Preparando ${normalized.length} productos...`);
-
-      // Mapeo de productos existentes por SKU
-      const existingMap = new Map();
-      products.forEach((p) => {
-        if (p.sku) existingMap.set(String(p.sku).trim().toLowerCase(), p);
-      });
-
-      // Si el modo es "replace", eliminamos los productos anteriores primero
-      if (importMode === 'replace' && products.length > 0) {
-        setImportProgress('Limpiando inventario anterior...');
-        const BATCH_SIZE = 400;
+      if (importMode === 'replace') {
+        setImportProgress('Eliminando inventario anterior...');
+        const BATCH_SIZE = 450;
         for (let i = 0; i < products.length; i += BATCH_SIZE) {
+          const chunk = products.slice(i, i + BATCH_SIZE);
           const batch = writeBatch(db);
-          const slice = products.slice(i, i + BATCH_SIZE);
-          slice.forEach((p) => batch.delete(doc(db, 'products', p.id)));
+          chunk.forEach((p) => batch.delete(doc(db, 'products', p.id)));
           await batch.commit();
         }
-        existingMap.clear();
       }
 
-      // Procesar importación en lotes de 400
-      const BATCH_SIZE = 400;
+      const existingMap = new Map();
+      if (importMode !== 'replace') {
+        products.forEach((p) => existingMap.set(p.sku.toLowerCase(), p));
+      }
+
+      const BATCH_SIZE = 450;
       let inserted = 0;
       let updated = 0;
       let skipped = 0;
@@ -301,6 +366,7 @@ export default function InventarioPage() {
             batch.set(newRef, {
               sku: item.sku,
               name: item.name || item.sku,
+              category: item.category || 'SIN CATEGORÍA',
               quantity: item.quantity,
               createdAt: serverTimestamp(),
               lastUpdated: serverTimestamp(),
@@ -312,6 +378,7 @@ export default function InventarioPage() {
             batch.set(newRef, {
               sku: item.sku,
               name: item.name || item.sku,
+              category: item.category || 'SIN CATEGORÍA',
               quantity: item.quantity,
               createdAt: serverTimestamp(),
               lastUpdated: serverTimestamp(),
@@ -321,18 +388,21 @@ export default function InventarioPage() {
           } else {
             // upsert (actualizar o crear)
             if (existing) {
-              batch.update(doc(db, 'products', existing.id), {
+              const updatePayload = {
                 name: item.name || existing.name,
                 quantity: item.quantity,
                 lastUpdated: serverTimestamp(),
                 updatedBy: currentUser.uid,
-              });
+              };
+              if (item.category) updatePayload.category = item.category;
+              batch.update(doc(db, 'products', existing.id), updatePayload);
               updated++;
             } else {
               const newRef = doc(collection(db, 'products'));
               batch.set(newRef, {
                 sku: item.sku,
                 name: item.name || item.sku,
+                category: item.category || 'SIN CATEGORÍA',
                 quantity: item.quantity,
                 createdAt: serverTimestamp(),
                 lastUpdated: serverTimestamp(),
@@ -396,7 +466,7 @@ export default function InventarioPage() {
       <div className="page-header">
         <h1 className="page-title">Inventario</h1>
         <p className="page-description">
-          {products.length} productos registrados
+          {products.length} productos registrados en {categories.length} categorías
         </p>
       </div>
 
@@ -407,12 +477,36 @@ export default function InventarioPage() {
             <i className="bi bi-search search-bar-icon"></i>
             <input
               type="text"
-              placeholder="Buscar por SKU o nombre..."
+              placeholder="Buscar por SKU, nombre o categoría..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+
+          {/* Toggle de Vista: Lista vs Secciones */}
+          <div className="view-toggle">
+            <button
+              className={`view-toggle-btn ${viewMode === 'flat' ? 'active' : ''}`}
+              onClick={() => setViewMode('flat')}
+              title="Vista de lista continua"
+            >
+              <i className="bi bi-list-ul"></i> Lista
+            </button>
+            <button
+              className={`view-toggle-btn ${viewMode === 'grouped' ? 'active' : ''}`}
+              onClick={() => {
+                setViewMode('grouped');
+                if (openSections.size === 0) {
+                  setOpenSections(new Set(categories));
+                }
+              }}
+              title="Vista agrupada por secciones"
+            >
+              <i className="bi bi-collection"></i> Secciones
+            </button>
+          </div>
         </div>
+
         <div className="toolbar-group">
           <button className="btn btn-secondary" onClick={() => setShowImportModal(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <i className="bi bi-file-earmark-arrow-up"></i> Importar Excel
@@ -426,7 +520,44 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Selector / Chips de Categorías */}
+      {categories.length > 0 && (
+        <div className="category-chips-wrapper">
+          <div className="category-chips">
+            <button
+              className={`category-chip ${selectedCategory === 'all' ? 'active' : ''}`}
+              onClick={() => setSelectedCategory('all')}
+            >
+              <i className="bi bi-grid"></i>
+              Todas las categorías
+              <span className="chip-count">{products.length}</span>
+            </button>
+            {categories.map((cat) => {
+              const style = getCategoryStyle(cat);
+              const isActive = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  className={`category-chip ${isActive ? 'active' : ''}`}
+                  onClick={() => setSelectedCategory(cat)}
+                  style={isActive ? { borderColor: style.color, color: style.color } : {}}
+                >
+                  <i className={`bi ${style.icon}`} style={{ color: style.color }}></i>
+                  {cat}
+                  <span
+                    className="chip-count"
+                    style={isActive ? { background: style.bg, color: style.color } : {}}
+                  >
+                    {categoryCounts[cat] || 0}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Contenido: Estado Vacío, Vista Agrupada o Tabla Plana */}
       {filteredProducts.length === 0 ? (
         <div className="card">
           <div className="empty-state">
@@ -434,15 +565,15 @@ export default function InventarioPage() {
               <i className="bi bi-box-seam"></i>
             </div>
             <div className="empty-state-title">
-              {search ? 'Sin resultados' : 'Inventario vacío'}
+              {search || selectedCategory !== 'all' ? 'Sin resultados' : 'Inventario vacío'}
             </div>
             <div className="empty-state-text">
-              {search
-                ? 'No se encontraron productos con esa búsqueda'
+              {search || selectedCategory !== 'all'
+                ? 'No se encontraron productos con los filtros aplicados'
                 : 'Agrega productos manualmente o importa tu archivo Excel con un clic'
               }
             </div>
-            {!search && (
+            {!search && selectedCategory === 'all' && (
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
                 <button className="btn btn-primary" onClick={openAddModal} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                   <i className="bi bi-plus-lg"></i> Agregar producto
@@ -454,93 +585,238 @@ export default function InventarioPage() {
             )}
           </div>
         </div>
+      ) : viewMode === 'grouped' ? (
+        /* ================= VISTA AGRUPADA POR SECCIONES ================= */
+        <div>
+          {Object.entries(groupedProducts).map(([cat, prods]) => {
+            const isOpen = openSections.has(cat);
+            const style = getCategoryStyle(cat);
+            const totalUnits = prods.reduce((sum, p) => sum + (p.quantity || 0), 0);
+
+            return (
+              <div key={cat} className="category-section">
+                <div className="category-section-header" onClick={() => toggleSection(cat)}>
+                  <div className="category-section-left">
+                    <div className="category-section-icon" style={{ background: style.bg, color: style.color }}>
+                      <i className={`bi ${style.icon}`}></i>
+                    </div>
+                    <div>
+                      <div className="category-section-name">{cat}</div>
+                    </div>
+                  </div>
+                  <div className="category-section-meta">
+                    <div className="category-section-stat">
+                      <span>Productos:</span>
+                      <strong>{prods.length}</strong>
+                    </div>
+                    <div className="category-section-stat">
+                      <span>Stock total:</span>
+                      <strong>{totalUnits}</strong>
+                    </div>
+                    <i className={`bi bi-chevron-down category-section-chevron ${isOpen ? 'open' : ''}`}></i>
+                  </div>
+                </div>
+
+                <div className={`category-section-body ${isOpen ? 'open' : ''}`}>
+                  <div className="table-container">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>SKU</th>
+                          <th>Nombre</th>
+                          <th>Cantidad</th>
+                          <th>Ajuste Rápido</th>
+                          <th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prods.map((product) => (
+                          <tr key={product.id}>
+                            <td>
+                              <code style={{
+                                background: 'rgba(0, 212, 255, 0.1)',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                color: 'var(--accent-primary)',
+                                fontSize: 'var(--font-size-sm)',
+                              }}>
+                                {product.sku}
+                              </code>
+                            </td>
+                            <td>{product.name}</td>
+                            <td>
+                              <span style={{
+                                fontWeight: 700,
+                                fontSize: 'var(--font-size-md)',
+                                color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
+                              }}>
+                                {product.quantity}
+                                {product.quantity < 0 && (
+                                  <span style={{
+                                    display: 'inline-block',
+                                    marginLeft: '8px',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    background: 'var(--danger-bg)',
+                                    color: 'var(--danger)',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                  }}>
+                                    Faltante
+                                  </span>
+                                )}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="quantity-control">
+                                <button
+                                  className="quantity-btn minus"
+                                  onClick={() => handleQuantityChange(product, -1)}
+                                >
+                                  −
+                                </button>
+                                <div className="quantity-display">
+                                  {product.quantity}
+                                </div>
+                                <button
+                                  className="quantity-btn plus"
+                                  onClick={() => handleQuantityChange(product, 1)}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => openEditModal(product)}
+                                >
+                                  ✏️ Editar
+                                </button>
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => handleDelete(product)}
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
+        /* ================= VISTA TABLA PLANA ================= */
         <div className="table-container">
           <table className="table">
             <thead>
               <tr>
                 <th>SKU</th>
                 <th>Nombre</th>
+                <th>Categoría</th>
                 <th>Cantidad</th>
                 <th>Ajuste Rápido</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {filteredProducts.map((product) => (
-                <tr key={product.id}>
-                  <td>
-                    <code style={{
-                      background: 'rgba(0, 212, 255, 0.1)',
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      color: 'var(--accent-primary)',
-                      fontSize: 'var(--font-size-sm)',
-                    }}>
-                      {product.sku}
-                    </code>
-                  </td>
-                  <td>{product.name}</td>
-                  <td>
-                    <span style={{
-                      fontWeight: 700,
-                      fontSize: 'var(--font-size-md)',
-                      color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
-                    }}>
-                      {product.quantity}
-                      {product.quantity < 0 && (
-                        <span style={{
-                          display: 'inline-block',
-                          marginLeft: '8px',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          background: 'var(--danger-bg)',
-                          color: 'var(--danger)',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                        }}>
-                          Faltante
-                        </span>
-                      )}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="quantity-control">
-                      <button
-                        className="quantity-btn minus"
-                        onClick={() => handleQuantityChange(product, -1)}
+              {filteredProducts.map((product) => {
+                const style = getCategoryStyle(product.category);
+                return (
+                  <tr key={product.id}>
+                    <td>
+                      <code style={{
+                        background: 'rgba(0, 212, 255, 0.1)',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        color: 'var(--accent-primary)',
+                        fontSize: 'var(--font-size-sm)',
+                      }}>
+                        {product.sku}
+                      </code>
+                    </td>
+                    <td>{product.name}</td>
+                    <td>
+                      <span
+                        className="category-badge"
+                        style={{
+                          background: style.bg,
+                          color: style.color,
+                          border: `1px solid ${style.color}33`,
+                        }}
                       >
-                        −
-                      </button>
-                      <div className="quantity-display">
+                        <i className={`bi ${style.icon}`} style={{ fontSize: '10px' }}></i>
+                        {(product.category || 'SIN CATEGORÍA').toUpperCase()}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{
+                        fontWeight: 700,
+                        fontSize: 'var(--font-size-md)',
+                        color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
+                      }}>
                         {product.quantity}
+                        {product.quantity < 0 && (
+                          <span style={{
+                            display: 'inline-block',
+                            marginLeft: '8px',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            background: 'var(--danger-bg)',
+                            color: 'var(--danger)',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                          }}>
+                            Faltante
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="quantity-control">
+                        <button
+                          className="quantity-btn minus"
+                          onClick={() => handleQuantityChange(product, -1)}
+                        >
+                          −
+                        </button>
+                        <div className="quantity-display">
+                          {product.quantity}
+                        </div>
+                        <button
+                          className="quantity-btn plus"
+                          onClick={() => handleQuantityChange(product, 1)}
+                        >
+                          +
+                        </button>
                       </div>
-                      <button
-                        className="quantity-btn plus"
-                        onClick={() => handleQuantityChange(product, 1)}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => openEditModal(product)}
-                      >
-                        ✏️ Editar
-                      </button>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleDelete(product)}
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => openEditModal(product)}
+                        >
+                          ✏️ Editar
+                        </button>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleDelete(product)}
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -576,11 +852,27 @@ export default function InventarioPage() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Ej: Cable HDMI 2m"
+                    placeholder="Ej: PLANCHA ONDULADA TRANSPARENTE 2.0M"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
                   />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Categoría / Sección</label>
+                  <input
+                    type="text"
+                    list="categories-list"
+                    className="form-input"
+                    placeholder="Seleccionar o escribir categoría..."
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  />
+                  <datalist id="categories-list">
+                    {categories.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Cantidad (permite números negativos para faltantes/déficit)</label>
@@ -615,7 +907,7 @@ export default function InventarioPage() {
               <div>
                 <h2 className="modal-title">📤 Importar Inventario desde Excel</h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  Carga masiva de productos mediante archivo .xlsx, .xls o .csv
+                  Carga masiva de productos mediante archivo .xlsx, .xls o .csv con detección de categorías
                 </p>
               </div>
               <button
@@ -686,7 +978,7 @@ export default function InventarioPage() {
                     Arrastra tu archivo Excel aquí o haz clic para seleccionarlo
                   </div>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                    Compatible con archivos .xlsx, .xls y .csv
+                    Compatible con archivos .xlsx, .xls y .csv (incluyendo formatos ERP)
                   </div>
                 </div>
               ) : (
@@ -733,7 +1025,7 @@ export default function InventarioPage() {
                     <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '14px' }}>
                       ⚙️ Asignación de Columnas del Excel:
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
                       <div>
                         <label className="form-label" style={{ fontSize: '12px' }}>Columna SKU / Código *</label>
                         <select
@@ -756,6 +1048,20 @@ export default function InventarioPage() {
                           onChange={(e) => setImportCols({ ...importCols, name: e.target.value })}
                         >
                           <option value="">(Opcional) Usar SKU como nombre</option>
+                          {importCols?.allHeaders.map((h) => (
+                            <option key={h} value={h}>{h}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="form-label" style={{ fontSize: '12px' }}>Columna Categoría / Grupo</label>
+                        <select
+                          className="form-input"
+                          value={importCols?.category || ''}
+                          onChange={(e) => setImportCols({ ...importCols, category: e.target.value })}
+                        >
+                          <option value="">(Opcional) Sin categoría</option>
                           {importCols?.allHeaders.map((h) => (
                             <option key={h} value={h}>{h}</option>
                           ))}
@@ -799,7 +1105,7 @@ export default function InventarioPage() {
                           onChange={(e) => setImportMode(e.target.value)}
                         />
                         <span>
-                          <strong>Actualizar y agregar nuevos (Recomendado)</strong>: Si el SKU ya existe, actualiza su stock; si no existe, lo crea.
+                          <strong>Actualizar y agregar nuevos (Recomendado)</strong>: Si el SKU ya existe, actualiza su stock y categoría; si no existe, lo crea.
                         </span>
                       </label>
 
@@ -842,17 +1148,34 @@ export default function InventarioPage() {
                           <tr>
                             <th>SKU</th>
                             <th>Nombre</th>
+                            <th>Categoría</th>
                             <th>Cantidad</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {importRawData.slice(0, 5).map((row, idx) => (
-                            <tr key={idx}>
-                              <td><code>{String(row[importCols?.sku] || '—')}</code></td>
-                              <td>{String(row[importCols?.name] || row[importCols?.sku] || '—')}</td>
-                              <td><strong>{row[importCols?.quantity] ?? 0}</strong></td>
-                            </tr>
-                          ))}
+                          {importRawData.slice(0, 5).map((row, idx) => {
+                            const catName = (row[importCols?.category] || 'SIN CATEGORÍA').toUpperCase();
+                            const catStyle = getCategoryStyle(catName);
+                            return (
+                              <tr key={idx}>
+                                <td><code>{String(row[importCols?.sku] || '—')}</code></td>
+                                <td>{String(row[importCols?.name] || row[importCols?.sku] || '—')}</td>
+                                <td>
+                                  <span
+                                    className="category-badge"
+                                    style={{
+                                      background: catStyle.bg,
+                                      color: catStyle.color,
+                                    }}
+                                  >
+                                    <i className={`bi ${catStyle.icon}`} style={{ fontSize: '10px' }}></i>
+                                    {catName}
+                                  </span>
+                                </td>
+                                <td><strong>{row[importCols?.quantity] ?? 0}</strong></td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

@@ -1,7 +1,53 @@
 import * as XLSX from '@e965/xlsx';
 
 /**
- * Lee un archivo Excel y retorna los datos como array de objetos JSON
+ * Patrones para detectar si una fila contiene headers de tabla.
+ * Usados tanto por parseExcelFile (detección de header row) como detectColumns.
+ */
+const HEADER_PATTERNS = {
+  sku: /^(sku|codigo|código|cod\.?\s*producto|code|barcode|c[oó]digo.*(barra|producto)|id.*producto|item)/i,
+  name: /^(nombre|name|descripci[oó]n|description|producto|product|art[ií]culo|item.?name)/i,
+  qty: /^(cantidad|qty|quantity|stock\s*total|stock|existencia|disponible|unidades|units|cant)/i,
+  category: /^(grupo|categor[ií]a|category|tipo|type|familia|family|l[ií]nea|secci[oó]n|section|class)/i,
+};
+
+/**
+ * Detecta la fila de headers reales dentro de un array de arrays raw.
+ * Útil para Excels tipo reporte ERP que tienen filas de título antes de la tabla real.
+ * Retorna el índice de la fila de headers, o -1 si no se encuentra.
+ */
+function findHeaderRowIndex(rawRows) {
+  for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
+    const row = rawRows[i];
+    if (!row || row.length < 2) continue;
+    const cells = row.map((c) => String(c || '').trim()).filter(Boolean);
+    if (cells.length < 2) continue;
+
+    // Buscar si al menos 2 de los 3 patrones coinciden
+    let matches = 0;
+    for (const cell of cells) {
+      if (HEADER_PATTERNS.sku.test(cell)) matches++;
+      else if (HEADER_PATTERNS.name.test(cell)) matches++;
+      else if (HEADER_PATTERNS.qty.test(cell)) matches++;
+    }
+    if (matches >= 2) return i;
+  }
+  return -1;
+}
+
+/**
+ * Filtra filas de totales intermedios de reportes ERP
+ * (ej: "Total Sub Grupo : ...", "Total Grupo : ...", "Total Final : ...")
+ */
+function isSummaryRow(row) {
+  const first = String(row[0] || '').trim();
+  return /^Total\s+(Sub\s+)?Grupo|^Total\s+Final/i.test(first);
+}
+
+/**
+ * Lee un archivo Excel y retorna los datos como array de objetos JSON.
+ * Detecta automáticamente la fila de headers reales incluso en reportes ERP
+ * que tienen filas de título, filas vacías y filas de totales intermedios.
  * @param {File} file - Archivo Excel subido
  * @returns {Promise<Array>} Array de objetos con los datos del Excel
  */
@@ -14,8 +60,38 @@ export function parseExcelFile(file) {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json(worksheet);
-        resolve(json);
+
+        // Primero, intentar lectura raw para detectar si es formato ERP
+        const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        const headerIdx = findHeaderRowIndex(rawRows);
+
+        if (headerIdx > 0) {
+          // Formato ERP detectado: construir JSON usando el header real
+          const headers = rawRows[headerIdx].map((h) => String(h || '').trim());
+          const results = [];
+
+          for (let i = headerIdx + 1; i < rawRows.length; i++) {
+            const row = rawRows[i];
+            if (!row || row.every((c) => c === '' || c === null || c === undefined)) continue;
+            if (isSummaryRow(row)) continue;
+
+            const obj = {};
+            let hasValue = false;
+            headers.forEach((h, j) => {
+              if (h) {
+                obj[h] = row[j] !== undefined ? row[j] : '';
+                if (row[j] !== '' && row[j] !== undefined && row[j] !== null) hasValue = true;
+              }
+            });
+            if (hasValue) results.push(obj);
+          }
+
+          resolve(results);
+        } else {
+          // Formato estándar: lectura normal
+          const json = XLSX.utils.sheet_to_json(worksheet);
+          resolve(json);
+        }
       } catch (error) {
         reject(new Error('Error al leer el archivo Excel: ' + error.message));
       }
@@ -26,26 +102,25 @@ export function parseExcelFile(file) {
 }
 
 /**
- * Detecta automáticamente las columnas de SKU, Nombre y Cantidad en los datos
- * Soporta variaciones comunes de nombres de columna
+ * Detecta automáticamente las columnas de SKU, Nombre y Cantidad en los datos.
+ * Soporta variaciones comunes de nombres de columna incluyendo reportes ERP
+ * (ej: "Cod. Producto", "Producto", "Stock Total").
  */
 export function detectColumns(data) {
   if (!data || data.length === 0) return null;
 
   const headers = Object.keys(data[0]);
 
-  const skuPatterns = /^(sku|codigo|código|cod|code|barcode|c[oó]digo.*(barra|producto)|id.*producto|item)/i;
-  const namePatterns = /^(nombre|name|descripci[oó]n|description|producto|product|art[ií]culo|item.?name)/i;
-  const qtyPatterns = /^(cantidad|qty|quantity|stock|existencia|unidades|units|cant)/i;
-
-  const skuCol = headers.find((h) => skuPatterns.test(h));
-  const nameCol = headers.find((h) => namePatterns.test(h));
-  const qtyCol = headers.find((h) => qtyPatterns.test(h));
+  const skuCol = headers.find((h) => HEADER_PATTERNS.sku.test(h));
+  const nameCol = headers.find((h) => HEADER_PATTERNS.name.test(h));
+  const qtyCol = headers.find((h) => HEADER_PATTERNS.qty.test(h));
+  const categoryCol = headers.find((h) => HEADER_PATTERNS.category.test(h));
 
   return {
     sku: skuCol || null,
     name: nameCol || null,
     quantity: qtyCol || null,
+    category: categoryCol || null,
     allHeaders: headers,
     detected: !!(skuCol && qtyCol),
   };
@@ -55,11 +130,17 @@ export function detectColumns(data) {
  * Normaliza los datos del Excel a un formato estándar
  */
 export function normalizeData(data, columnMapping) {
-  return data.map((row) => ({
-    sku: String(row[columnMapping.sku] || '').trim(),
-    name: String(row[columnMapping.name] || '').trim(),
-    quantity: parseInt(row[columnMapping.quantity]) || 0,
-  }));
+  return data.map((row) => {
+    const item = {
+      sku: String(row[columnMapping.sku] || '').trim(),
+      name: String(row[columnMapping.name] || '').trim(),
+      quantity: parseInt(row[columnMapping.quantity]) || 0,
+    };
+    if (columnMapping.category) {
+      item.category = String(row[columnMapping.category] || '').trim().toUpperCase() || 'SIN CATEGORÍA';
+    }
+    return item;
+  });
 }
 
 /**
@@ -202,10 +283,11 @@ export function downloadWorkbook(workbook, filename = 'reporte.xlsx') {
  */
 export function exportInventoryToExcel(products, filename = 'inventario.xlsx') {
   const wb = XLSX.utils.book_new();
-  const headers = ['SKU', 'Nombre', 'Cantidad', 'Última Actualización'];
+  const headers = ['SKU', 'Nombre', 'Categoría', 'Cantidad', 'Última Actualización'];
   const rows = products.map((p) => [
     sanitizeCell(p.sku),
     sanitizeCell(p.name),
+    sanitizeCell(p.category || 'SIN CATEGORÍA'),
     p.quantity,
     p.lastUpdated?.toDate ? p.lastUpdated.toDate().toLocaleString('es-AR') : '',
   ]);
@@ -213,3 +295,4 @@ export function exportInventoryToExcel(products, filename = 'inventario.xlsx') {
   XLSX.utils.book_append_sheet(wb, ws, 'Inventario');
   XLSX.writeFile(wb, filename);
 }
+
