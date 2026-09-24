@@ -140,84 +140,127 @@ export default function InventarioPage() {
 
   const renderProductMobileCard = (product, showCategory = false) => {
     const style = getCategoryStyle(product.category);
+    const isNegative = (product.quantity || 0) < 0;
+    const isZero = (product.quantity || 0) === 0;
+    const isLow = (product.quantity || 0) > 0 && (product.quantity || 0) < 10;
+
     return (
-      <div key={product.id} className="mobile-product-card">
-        <div className="mpc-top">
-          <code className="mpc-sku">{product.sku}</code>
-          {showCategory && (
+      <div key={product.id} className="card bg-dark border-secondary text-light mb-2 shadow-sm" style={{ background: 'rgba(15, 15, 35, 0.95)' }}>
+        <div className="card-body p-3">
+          {/* Header: SKU + Categoría */}
+          <div className="d-flex justify-content-between align-items-center mb-2 gap-2">
             <span
-              className="category-badge"
+              className="badge font-monospace text-truncate"
               style={{
-                background: style.bg,
-                color: style.color,
-                border: `1px solid ${style.color}33`,
+                background: 'rgba(0, 212, 255, 0.15)',
+                color: '#00d4ff',
+                fontSize: '12px',
+                maxWidth: '65%',
+                padding: '4px 8px',
               }}
             >
-              <i className={`bi ${style.icon}`} style={{ fontSize: '10px' }}></i>
-              {(product.category || 'SIN CATEGORÍA').toUpperCase()}
+              {product.sku || 'SIN SKU'}
             </span>
-          )}
-        </div>
-
-        <div className="mpc-name">{product.name}</div>
-
-        <div className="mpc-stock-row">
-          <div className="mpc-stock-info">
-            <span className="mpc-stock-label">Stock actual</span>
-            <div className="mpc-stock-value">
-              <span style={{
-                color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
-                fontWeight: 700,
-                fontSize: '17px',
-              }}>
-                {product.quantity} uds
+            {showCategory && (
+              <span
+                className="badge text-truncate"
+                style={{
+                  background: style.bg,
+                  color: style.color,
+                  border: `1px solid ${style.color}44`,
+                  fontSize: '11px',
+                }}
+              >
+                <i className={`bi ${style.icon} me-1`}></i>
+                {(product.category || 'SIN CATEGORÍA').toUpperCase()}
               </span>
-              {product.quantity < 0 && (
-                <span className="mpc-deficit-pill">Faltante</span>
-              )}
+            )}
+          </div>
+
+          {/* Nombre Producto */}
+          <h6 className="card-title fw-bold text-light mb-3" style={{ fontSize: '15px', lineHeight: 1.35, wordBreak: 'break-word' }}>
+            {product.name}
+          </h6>
+
+          {/* Fila Stock Actual + Stepper Táctil */}
+          <div
+            className="p-2 rounded mb-3 d-flex justify-content-between align-items-center gap-2"
+            style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+            }}
+          >
+            <div className="min-w-0">
+              <small className="text-secondary text-uppercase fw-bold d-block" style={{ fontSize: '10px', letterSpacing: '0.05em' }}>
+                Stock actual
+              </small>
+              <div className="d-flex align-items-center gap-2 mt-1">
+                <span
+                  className="fw-bold fs-5"
+                  style={{
+                    color: isNegative ? 'var(--danger, #ef4444)' : isZero || isLow ? 'var(--warning, #f59e0b)' : 'var(--text-primary, #f0f0f5)',
+                  }}
+                >
+                  {product.quantity} uds
+                </span>
+                {isNegative && (
+                  <span className="badge bg-danger text-light px-2 py-1" style={{ fontSize: '10px' }}>
+                    Faltante
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Stepper Buttons (44x44px touch targets) */}
+            <div className="btn-group" role="group" aria-label="Ajustar stock">
+              <button
+                type="button"
+                className="btn btn-outline-secondary text-light fw-bold fs-5 px-3 py-2"
+                onClick={() => handleQuantityChange(product, -1)}
+                style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                aria-label="Restar 1"
+              >
+                −
+              </button>
+              <span
+                className="btn btn-dark text-light fw-bold disabled fs-6 px-2 py-2"
+                style={{ minWidth: '42px', opacity: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                {product.quantity}
+              </span>
+              <button
+                type="button"
+                className="btn btn-outline-info text-info fw-bold fs-5 px-3 py-2"
+                onClick={() => handleQuantityChange(product, 1)}
+                style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                aria-label="Sumar 1"
+              >
+                +
+              </button>
             </div>
           </div>
 
-          <div className="quantity-control mpc-stepper">
+          {/* Acciones: Editar y Eliminar */}
+          <div className="d-flex gap-2">
             <button
               type="button"
-              className="quantity-btn minus"
-              onClick={() => handleQuantityChange(product, -1)}
-              aria-label="Restar 1"
+              className="btn btn-outline-secondary text-light btn-sm flex-grow-1 py-2 fw-semibold d-flex align-items-center justify-content-center gap-2"
+              onClick={() => openEditModal(product)}
+              style={{ minHeight: '42px' }}
             >
-              −
+              <i className="bi bi-pencil-square"></i> Editar
             </button>
-            <div className="quantity-display">
-              {product.quantity}
-            </div>
             <button
               type="button"
-              className="quantity-btn plus"
-              onClick={() => handleQuantityChange(product, 1)}
-              aria-label="Sumar 1"
+              className="btn btn-outline-danger btn-sm px-3 py-2 d-flex align-items-center justify-content-center"
+              onClick={() => handleDelete(product)}
+              title="Eliminar producto"
+              aria-label="Eliminar producto"
+              style={{ minWidth: '44px', minHeight: '42px' }}
             >
-              +
+              <i className="bi bi-trash3"></i>
             </button>
           </div>
-        </div>
-
-        <div className="mpc-actions">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm mpc-edit-btn"
-            onClick={() => openEditModal(product)}
-          >
-            <i className="bi bi-pencil-square"></i> Editar
-          </button>
-          <button
-            type="button"
-            className="btn btn-danger btn-sm mpc-delete-btn"
-            onClick={() => handleDelete(product)}
-            title="Eliminar producto"
-            aria-label="Eliminar producto"
-          >
-            <i className="bi bi-trash3"></i>
-          </button>
         </div>
       </div>
     );
@@ -616,81 +659,91 @@ export default function InventarioPage() {
         </p>
       </div>
 
-      {/* Toolbar */}
-      <div className="inventory-toolbar">
+      {/* Bootstrap 5 Responsive Toolbar */}
+      <div className="row g-2 mb-3 align-items-center">
         {/* Search Bar */}
-        <div className="search-bar inventory-search">
-          <i className="bi bi-search search-bar-icon"></i>
-          <input
-            type="text"
-            placeholder="Buscar por SKU, nombre o categoría..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
-            <button
-              type="button"
-              className="search-clear-btn"
-              onClick={() => setSearch('')}
-              aria-label="Limpiar búsqueda"
-            >
-              ✕
-            </button>
-          )}
+        <div className="col-12 col-md-5 col-lg-6">
+          <div className="input-group">
+            <span className="input-group-text bg-dark border-secondary text-secondary">
+              <i className="bi bi-search"></i>
+            </span>
+            <input
+              type="text"
+              className="form-control bg-dark border-secondary text-light"
+              placeholder="Buscar por SKU, nombre o categoría..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ fontSize: '15px' }}
+            />
+            {search && (
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => setSearch('')}
+                aria-label="Limpiar búsqueda"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Controls Row */}
-        <div className="inventory-controls-row">
-          <div className="view-toggle">
+        {/* View Toggle */}
+        <div className="col-12 col-md-auto">
+          <div className="btn-group w-100" role="group">
             <button
               type="button"
-              className={`view-toggle-btn ${viewMode === 'grouped' ? 'active' : ''}`}
+              className={`btn btn-sm ${viewMode === 'grouped' ? 'btn-primary' : 'btn-outline-secondary text-light'}`}
               onClick={() => {
                 setViewMode('grouped');
                 if (openSections.size === 0) {
                   setOpenSections(new Set(categories));
                 }
               }}
-              title="Vista agrupada por secciones"
+              style={{ minHeight: '40px' }}
             >
-              <i className="bi bi-collection"></i> Secciones
+              <i className="bi bi-collection me-1"></i> Secciones
             </button>
             <button
               type="button"
-              className={`view-toggle-btn ${viewMode === 'flat' ? 'active' : ''}`}
+              className={`btn btn-sm ${viewMode === 'flat' ? 'btn-primary' : 'btn-outline-secondary text-light'}`}
               onClick={() => setViewMode('flat')}
-              title="Vista de lista continua"
+              style={{ minHeight: '40px' }}
             >
-              <i className="bi bi-list-ul"></i> Lista
+              <i className="bi bi-list-ul me-1"></i> Lista
             </button>
           </div>
+        </div>
 
-          <div className="inventory-actions">
-            <button
-              type="button"
-              className="btn btn-secondary btn-toolbar-action"
-              onClick={() => setShowImportModal(true)}
-            >
-              <i className="bi bi-file-earmark-arrow-up"></i>
-              <span>Importar Excel</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-toolbar-action"
-              onClick={handleExport}
-            >
-              <i className="bi bi-file-earmark-excel"></i>
-              <span>Exportar Excel</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-add-product"
-              onClick={openAddModal}
-            >
-              <i className="bi bi-plus-lg"></i>
-              <span>Agregar Producto</span>
-            </button>
-          </div>
+        {/* Action Buttons */}
+        <div className="col-12 col-md d-flex justify-content-md-end gap-2 flex-wrap">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary text-light flex-grow-1 flex-md-grow-0 d-flex align-items-center justify-content-center gap-1"
+            onClick={() => setShowImportModal(true)}
+            style={{ minHeight: '40px' }}
+          >
+            <i className="bi bi-file-earmark-arrow-up"></i>
+            <span>Importar Excel</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary text-light flex-grow-1 flex-md-grow-0 d-flex align-items-center justify-content-center gap-1"
+            onClick={handleExport}
+            style={{ minHeight: '40px' }}
+          >
+            <i className="bi bi-file-earmark-excel"></i>
+            <span>Exportar Excel</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary w-100 w-md-auto order-first order-md-last d-flex align-items-center justify-content-center gap-1 fw-bold"
+            onClick={openAddModal}
+            style={{ minHeight: '44px' }}
+          >
+            <i className="bi bi-plus-lg"></i>
+            <span>Agregar Producto</span>
+          </button>
         </div>
       </div>
 
@@ -786,8 +839,8 @@ export default function InventarioPage() {
 
                 <div className={`category-section-body ${isOpen ? 'open' : ''}`}>
                   {/* Desktop Table View */}
-                  <div className="table-container desktop-only">
-                    <table className="table">
+                  <div className="table-responsive d-none d-md-block">
+                    <table className="table table-dark table-hover align-middle mb-0">
                       <thead>
                         <tr>
                           <th>SKU</th>
@@ -876,8 +929,8 @@ export default function InventarioPage() {
                     </table>
                   </div>
 
-                  {/* Mobile Cards View */}
-                  <div className="mobile-cards-list mobile-only">
+                  {/* Mobile Cards View (Bootstrap 5) */}
+                  <div className="d-block d-md-none p-2">
                     {prods.map((product) => renderProductMobileCard(product, false))}
                   </div>
                 </div>
@@ -889,8 +942,8 @@ export default function InventarioPage() {
         /* ================= VISTA TABLA PLANA ================= */
         <div>
           {/* Desktop Table View */}
-          <div className="table-container desktop-only">
-            <table className="table">
+          <div className="table-responsive d-none d-md-block">
+            <table className="table table-dark table-hover align-middle mb-0">
               <thead>
                 <tr>
                   <th>SKU</th>
@@ -996,8 +1049,8 @@ export default function InventarioPage() {
             </table>
           </div>
 
-          {/* Mobile Cards View */}
-          <div className="mobile-cards-list mobile-only">
+          {/* Mobile Cards View (Bootstrap 5) */}
+          <div className="d-block d-md-none py-2">
             {filteredProducts.map((product) => renderProductMobileCard(product, true))}
           </div>
         </div>
