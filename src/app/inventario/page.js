@@ -31,8 +31,9 @@ export default function InventarioPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [editProduct, setEditProduct] = useState(null);
   const [formData, setFormData] = useState({ sku: '', name: '', quantity: '', category: '' });
+  const [stockEditMode, setStockEditMode] = useState('add'); // 'add' | 'set'
+  const [quantityToAdd, setQuantityToAdd] = useState('');
 
   // Estados para Categorías
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -266,9 +267,33 @@ export default function InventarioPage() {
     );
   };
 
+  const evaluateMathInput = (val) => {
+    if (!val || typeof val !== 'string') return 0;
+    const trimmed = val.trim();
+    if (!trimmed) return 0;
+    if (/^[+-]?\d+([+-]\d+)*$/.test(trimmed.replace(/\s+/g, ''))) {
+      try {
+        const tokens = trimmed.match(/[+-]?\s*\d+/g);
+        if (tokens) {
+          return tokens.reduce((sum, t) => sum + parseInt(t.replace(/\s+/g, ''), 10), 0);
+        }
+      } catch {
+        return parseInt(trimmed, 10) || 0;
+      }
+    }
+    return parseInt(trimmed, 10) || 0;
+  };
+
+  const currentBaseQty = editProduct ? (editProduct.quantity || 0) : 0;
+  const parsedAddQty = evaluateMathInput(quantityToAdd);
+  const calculatedQtyFromAdd = currentBaseQty + parsedAddQty;
+  const calculatedQtyFromSet = evaluateMathInput(formData.quantity);
+
   const openAddModal = () => {
     setEditProduct(null);
     setFormData({ sku: '', name: '', quantity: '', category: '' });
+    setStockEditMode('set');
+    setQuantityToAdd('');
     setShowModal(true);
   };
 
@@ -277,9 +302,11 @@ export default function InventarioPage() {
     setFormData({
       sku: product.sku,
       name: product.name,
-      quantity: String(product.quantity),
+      quantity: String(product.quantity ?? 0),
       category: product.category || '',
     });
+    setStockEditMode('add');
+    setQuantityToAdd('');
     setShowModal(true);
   };
 
@@ -288,7 +315,9 @@ export default function InventarioPage() {
     const cleanSku = formData.sku.trim().slice(0, 100);
     const cleanName = formData.name.trim().slice(0, 200);
     const cleanCategory = (formData.category || 'SIN CATEGORÍA').trim().toUpperCase();
-    const qty = parseInt(formData.quantity) || 0;
+    const qty = editProduct
+      ? (stockEditMode === 'add' ? calculatedQtyFromAdd : calculatedQtyFromSet)
+      : evaluateMathInput(formData.quantity);
 
     if (!cleanSku || !cleanName) return;
 
@@ -1120,24 +1149,213 @@ export default function InventarioPage() {
                     ))}
                   </datalist>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Cantidad (permite números negativos para faltantes/déficit)</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    placeholder="0 (ej: -3 si hay faltante)"
-                    value={formData.quantity}
-                    onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                    required
-                  />
-                </div>
+                {/* Gestión de Cantidad / Stock */}
+                {editProduct ? (
+                  <div className="mb-3 p-3 rounded" style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    {/* Encabezado: Stock actual */}
+                    <div className="d-flex justify-content-between align-items-center mb-3">
+                      <div>
+                        <span className="text-secondary small text-uppercase fw-bold d-block" style={{ fontSize: '11px', letterSpacing: '0.05em' }}>
+                          Stock actual en bodega
+                        </span>
+                        <span className="fs-5 fw-bold text-light">
+                          {currentBaseQty} {currentBaseQty === 1 ? 'unidad' : 'unidades'}
+                        </span>
+                      </div>
+                      <span
+                        className="badge px-3 py-2 fs-6 font-monospace"
+                        style={{
+                          background: currentBaseQty < 0 ? 'rgba(239, 68, 68, 0.2)' : currentBaseQty === 0 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(0, 212, 255, 0.15)',
+                          color: currentBaseQty < 0 ? '#ef4444' : currentBaseQty === 0 ? '#f59e0b' : '#00d4ff',
+                          border: `1px solid ${currentBaseQty < 0 ? '#ef444455' : currentBaseQty === 0 ? '#f59e0b55' : '#00d4ff55'}`,
+                        }}
+                      >
+                        {currentBaseQty} uds
+                      </span>
+                    </div>
+
+                    {/* Selector de modo */}
+                    <div className="btn-group w-100 mb-3" role="group">
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${stockEditMode === 'add' ? 'btn-primary fw-bold' : 'btn-outline-secondary text-light'}`}
+                        onClick={() => setStockEditMode('add')}
+                        style={{ minHeight: '38px' }}
+                      >
+                        <i className="bi bi-plus-slash-minus me-1"></i> Sumar / Ajustar
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${stockEditMode === 'set' ? 'btn-primary fw-bold' : 'btn-outline-secondary text-light'}`}
+                        onClick={() => {
+                          setStockEditMode('set');
+                          if (!formData.quantity) setFormData(prev => ({ ...prev, quantity: String(currentBaseQty) }));
+                        }}
+                        style={{ minHeight: '38px' }}
+                      >
+                        <i className="bi bi-pencil me-1"></i> Total Manual
+                      </button>
+                    </div>
+
+                    {/* Contenido según el modo */}
+                    {stockEditMode === 'add' ? (
+                      <div>
+                        <div className="d-flex justify-content-between align-items-center mb-1">
+                          <label className="form-label mb-0" style={{ fontSize: '13px' }}>
+                            ¿Cuánto deseas sumar? <small className="text-secondary">(o restar con -)</small>
+                          </label>
+                          {quantityToAdd && (
+                            <button
+                              type="button"
+                              className="btn btn-link btn-sm text-secondary p-0 text-decoration-none"
+                              onClick={() => setQuantityToAdd('')}
+                              style={{ fontSize: '12px' }}
+                            >
+                              ✕ Limpiar
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Input de cantidad a sumar */}
+                        <div className="input-group mb-2">
+                          <span className="input-group-text bg-dark border-secondary text-info fw-bold fs-5 px-3">
+                            +
+                          </span>
+                          <input
+                            type="text"
+                            className="form-control bg-dark border-secondary text-light fs-5 fw-bold"
+                            placeholder="0 (ej: 6 para sumar seis)"
+                            value={quantityToAdd}
+                            onChange={(e) => setQuantityToAdd(e.target.value)}
+                            autoFocus
+                            style={{ minHeight: '44px' }}
+                          />
+                        </div>
+
+                        {/* Botones de suma rápida */}
+                        <div className="mb-3">
+                          <div className="text-secondary mb-1" style={{ fontSize: '11px' }}>
+                            Sumar rápido con un toque:
+                          </div>
+                          <div className="d-flex flex-wrap gap-1">
+                            {[1, 2, 5, 10, 20, 50, 100].map((inc) => (
+                              <button
+                                key={inc}
+                                type="button"
+                                className="btn btn-sm btn-outline-info flex-fill"
+                                onClick={() => {
+                                  const current = evaluateMathInput(quantityToAdd);
+                                  setQuantityToAdd(String(current + inc));
+                                }}
+                                style={{ minHeight: '34px', fontSize: '12px', padding: '4px 8px' }}
+                              >
+                                +{inc}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-warning"
+                              onClick={() => {
+                                const current = evaluateMathInput(quantityToAdd);
+                                setQuantityToAdd(String(current - 1));
+                              }}
+                              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 8px' }}
+                              title="Restar 1"
+                            >
+                              -1
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-warning"
+                              onClick={() => {
+                                const current = evaluateMathInput(quantityToAdd);
+                                setQuantityToAdd(String(current - 5));
+                              }}
+                              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 8px' }}
+                              title="Restar 5"
+                            >
+                              -5
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Tarjeta de Cálculo en Vivo (Resultado Final) */}
+                        <div
+                          className="p-3 rounded d-flex align-items-center justify-content-between"
+                          style={{
+                            background: 'rgba(0, 212, 255, 0.08)',
+                            border: '1px solid rgba(0, 212, 255, 0.25)',
+                          }}
+                        >
+                          <div>
+                            <div className="text-secondary small" style={{ fontSize: '11px' }}>
+                              Cálculo: {currentBaseQty} {parsedAddQty >= 0 ? `+ ${parsedAddQty}` : `- ${Math.abs(parsedAddQty)}`}
+                            </div>
+                            <div className="fw-semibold text-light" style={{ fontSize: '13px' }}>
+                              Resultado final en stock:
+                            </div>
+                          </div>
+                          <div className="text-end">
+                            <span className="fs-4 fw-bold text-info">
+                              {calculatedQtyFromAdd} uds
+                            </span>
+                            {parsedAddQty !== 0 && (
+                              <small className={`d-block fw-bold ${parsedAddQty > 0 ? 'text-success' : 'text-danger'}`} style={{ fontSize: '11px' }}>
+                                {parsedAddQty > 0 ? `(+${parsedAddQty} agregadas)` : `(${parsedAddQty} descontadas)`}
+                              </small>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="form-label" style={{ fontSize: '13px' }}>
+                          Stock Total Directo <small className="text-secondary">(puedes escribir números o sumas ej: 4+6)</small>
+                        </label>
+                        <input
+                          type="text"
+                          className="form-control bg-dark border-secondary text-light fs-5"
+                          placeholder="Ej: 10 o 4+6"
+                          value={formData.quantity}
+                          onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                          required
+                          style={{ minHeight: '44px' }}
+                        />
+                        {formData.quantity && (formData.quantity.includes('+') || formData.quantity.includes('-')) && (
+                          <div className="text-info small mt-1">
+                            = <strong>{calculatedQtyFromSet} unidades</strong>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="form-group mb-3">
+                    <label className="form-label">Cantidad Inicial (permite números negativos para faltantes/déficit)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      placeholder="0 (ej: -3 si hay faltante)"
+                      value={formData.quantity}
+                      onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                      required
+                      style={{ minHeight: '44px' }}
+                    />
+                  </div>
+                )}
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)} style={{ minHeight: '42px' }}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  {editProduct ? 'Guardar Cambios' : 'Agregar'}
+                <button type="submit" className="btn btn-primary fw-bold" style={{ minHeight: '42px' }}>
+                  {editProduct ? (
+                    stockEditMode === 'add'
+                      ? (parsedAddQty !== 0 ? `Guardar (${currentBaseQty} → ${calculatedQtyFromAdd} uds)` : 'Guardar Cambios')
+                      : `Guardar (${calculatedQtyFromSet} uds)`
+                  ) : (
+                    'Agregar'
+                  )}
                 </button>
               </div>
             </form>
