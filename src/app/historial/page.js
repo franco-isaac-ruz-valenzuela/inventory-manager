@@ -5,8 +5,7 @@ import { db } from '../../lib/firebase';
 import { collection, query, orderBy, limit, onSnapshot, where } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { getActionStyle, getActionMessage } from '../../lib/auditLog';
-import { timeAgo } from '../../lib/notifications';
-import * as XLSX from '@e965/xlsx';
+import { exportHistoryToExcel } from '../../lib/excelUtils';
 
 const actionTypes = [
   { value: 'all', label: 'Todas', icon: 'bi bi-list-ul' },
@@ -92,23 +91,8 @@ export default function HistorialPage() {
   });
 
   const handleExportHistory = () => {
-    const headers = ['Fecha', 'Usuario', 'Email', 'Acción', 'SKU', 'Producto', 'Valor Anterior', 'Valor Nuevo', 'Descripción'];
-    const rows = filteredLogs.map((log) => [
-      log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('es-AR') : '',
-      log.userName || '',
-      log.userEmail || '',
-      log.action || '',
-      log.details?.sku || '',
-      log.details?.productName || '',
-      log.details?.previousValue ?? '',
-      log.details?.newValue ?? '',
-      log.details?.description || '',
-    ]);
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    XLSX.utils.book_append_sheet(wb, ws, 'Historial');
-    XLSX.writeFile(wb, `historial_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    if (filteredLogs.length === 0) return;
+    exportHistoryToExcel(filteredLogs, `historial_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   if (loading) {
