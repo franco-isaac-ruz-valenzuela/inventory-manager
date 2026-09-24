@@ -30,3 +30,8 @@ npm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local files & scratch
+/scratch/
+*.xlsx
+

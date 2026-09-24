@@ -14,6 +14,7 @@ export default function DashboardPage() {
     lowStock: 0,
     lowStockByCategory: {},
     sessions: 0,
+    totalActivities: 0,
   });
   const [showLowStockModal, setShowLowStockModal] = useState(false);
   const [recentActivity, setRecentActivity] = useState([]);
@@ -36,6 +37,9 @@ export default function DashboardPage() {
       });
       setStats((prev) => ({ ...prev, totalProducts: total, lowStock: low, lowStockByCategory: byCat }));
       setLoading(false);
+    }, (err) => {
+      console.error('Error escuchando productos:', err);
+      setLoading(false);
     });
 
     // Listen to recent audit log
@@ -44,17 +48,28 @@ export default function DashboardPage() {
       orderBy('timestamp', 'desc'),
       limit(15)
     );
-    const unsubAudit = onSnapshot(auditQuery, (snapshot) => {
-      const activities = [];
-      snapshot.forEach((doc) => {
-        activities.push({ id: doc.id, ...doc.data() });
-      });
-      setRecentActivity(activities);
-    });
+    const unsubAudit = onSnapshot(
+      auditQuery,
+      (snapshot) => {
+        const activities = [];
+        snapshot.forEach((doc) => {
+          activities.push({ id: doc.id, ...doc.data() });
+        });
+        setRecentActivity(activities);
+      },
+      (error) => {
+        console.error('Error escuchando actividades recientes:', error);
+      }
+    );
 
     // Count sessions
     getCountFromServer(collection(db, 'inventory_sessions')).then((snap) => {
       setStats((prev) => ({ ...prev, sessions: snap.data().count }));
+    }).catch(() => {});
+
+    // Count total audit activities
+    getCountFromServer(collection(db, 'audit_log')).then((snap) => {
+      setStats((prev) => ({ ...prev, totalActivities: snap.data().count }));
     }).catch(() => {});
 
     return () => {
@@ -118,22 +133,42 @@ export default function DashboardPage() {
           <div className="stat-value">{stats.sessions}</div>
           <div className="stat-label">Comparaciones realizadas</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon icon-emerald">
-            <i className="bi bi-clock-history"></i>
+        <Link
+          href="/historial"
+          className="stat-card"
+          style={{ textDecoration: 'none', color: 'inherit', cursor: 'pointer', transition: 'all 0.2s ease' }}
+          title="Haz clic para ver el historial completo de actividades"
+        >
+          <div className="d-flex justify-content-between align-items-start">
+            <div className="stat-icon icon-emerald">
+              <i className="bi bi-clock-history"></i>
+            </div>
+            <span className="badge bg-success-subtle text-success border border-success-subtle font-monospace" style={{ fontSize: '10px' }}>
+              Ver todo →
+            </span>
           </div>
-          <div className="stat-value">{recentActivity.length}</div>
-          <div className="stat-label">Actividades recientes</div>
-        </div>
+          <div className="stat-value">{stats.totalActivities || recentActivity.length}</div>
+          <div className="stat-label">Actividades registradas</div>
+          <div className="text-secondary mt-1" style={{ fontSize: '11px', lineHeight: 1.3 }}>
+            {recentActivity.length} recientes en vivo abajo • Clic para ver historial
+          </div>
+        </Link>
       </div>
 
       {/* Activity Feed */}
       <div className="card">
-        <div className="card-header">
-          <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
             <i className="bi bi-broadcast" style={{ color: 'var(--danger)' }}></i> Actividad en Vivo
+            <span className="badge badge-info" style={{ fontSize: '11px', marginLeft: '6px' }}>Tiempo real</span>
           </h2>
-          <span className="badge badge-info">Tiempo real</span>
+          <Link
+            href="/historial"
+            className="btn btn-sm btn-secondary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', textDecoration: 'none' }}
+          >
+            <i className="bi bi-clock-history"></i> Ver historial completo ({stats.totalActivities || '770+'}) →
+          </Link>
         </div>
 
         {recentActivity.length === 0 ? (

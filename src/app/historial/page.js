@@ -10,7 +10,7 @@ import * as XLSX from '@e965/xlsx';
 
 const actionTypes = [
   { value: 'all', label: 'Todas', icon: 'bi bi-list-ul' },
-  { value: 'producto_agregado', label: 'Agregados', icon: 'bi bi-plus-circle' },
+  { value: 'producto_agregado', label: 'Agregados / Creados', icon: 'bi bi-plus-circle' },
   { value: 'producto_editado', label: 'Editados', icon: 'bi bi-pencil-square' },
   { value: 'producto_eliminado', label: 'Eliminados', icon: 'bi bi-trash3' },
   { value: 'cantidad_descontada', label: 'Descontados', icon: 'bi bi-dash-circle' },
@@ -18,6 +18,7 @@ const actionTypes = [
   { value: 'escaneo', label: 'Escaneos', icon: 'bi bi-upc-scan' },
   { value: 'excel_subido', label: 'Excel', icon: 'bi bi-file-earmark-excel' },
   { value: 'comparacion_realizada', label: 'Comparaciones', icon: 'bi bi-arrow-left-right' },
+  { value: 'reporte_descargado', label: 'Reportes', icon: 'bi bi-download' },
 ];
 
 export default function HistorialPage() {
@@ -33,36 +34,49 @@ export default function HistorialPage() {
     const q = query(
       collection(db, 'audit_log'),
       orderBy('timestamp', 'desc'),
-      limit(200)
+      limit(300)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = [];
-      const userSet = new Map();
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const data = [];
+        const userSet = new Map();
 
-      snapshot.forEach((doc) => {
-        const entry = { id: doc.id, ...doc.data() };
-        data.push(entry);
+        snapshot.forEach((doc) => {
+          const entry = { id: doc.id, ...doc.data() };
+          data.push(entry);
 
-        if (entry.userId && !userSet.has(entry.userId)) {
-          userSet.set(entry.userId, {
-            uid: entry.userId,
-            name: entry.userName || entry.userEmail || 'Desconocido',
-          });
-        }
-      });
+          if (entry.userId && !userSet.has(entry.userId)) {
+            userSet.set(entry.userId, {
+              uid: entry.userId,
+              name: entry.userName || entry.userEmail || 'Desconocido',
+            });
+          }
+        });
 
-      setLogs(data);
-      setUsers(Array.from(userSet.values()));
-      setLoading(false);
-    });
+        setLogs(data);
+        setUsers(Array.from(userSet.values()));
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error cargando historial de auditoría:', error);
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
 
   // Filtrar logs
   const filteredLogs = logs.filter((log) => {
-    if (filterAction !== 'all' && log.action !== filterAction) return false;
+    if (filterAction !== 'all') {
+      if (filterAction === 'producto_agregado') {
+        if (log.action !== 'producto_agregado' && log.action !== 'producto_creado') return false;
+      } else if (log.action !== filterAction) {
+        return false;
+      }
+    }
     if (filterUser !== 'all' && log.userId !== filterUser) return false;
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
