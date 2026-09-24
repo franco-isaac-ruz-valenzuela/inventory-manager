@@ -145,7 +145,7 @@ export default function InventarioPage() {
     const isLow = (product.quantity || 0) > 0 && (product.quantity || 0) < 10;
 
     return (
-      <div key={product.id} className="card bg-dark border-secondary text-light mb-2 shadow-sm" style={{ background: 'rgba(15, 15, 35, 0.95)' }}>
+      <div key={product.id} className="card bg-dark border-secondary text-light h-100 shadow-sm" style={{ background: 'rgba(15, 15, 35, 0.95)' }}>
         <div className="card-body p-3">
           {/* Header: SKU + Categoría */}
           <div className="d-flex justify-content-between align-items-center mb-2 gap-2">
@@ -662,7 +662,7 @@ export default function InventarioPage() {
       {/* Bootstrap 5 Responsive Toolbar */}
       <div className="row g-2 mb-3 align-items-center">
         {/* Search Bar */}
-        <div className="col-12 col-md-5 col-lg-6">
+        <div className="col-12 col-md-6 col-xl-5">
           <div className="input-group">
             <span className="input-group-text bg-dark border-secondary text-secondary">
               <i className="bi bi-search"></i>
@@ -673,7 +673,7 @@ export default function InventarioPage() {
               placeholder="Buscar por SKU, nombre o categoría..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ fontSize: '15px' }}
+              style={{ fontSize: '15px', minHeight: '42px' }}
             />
             {search && (
               <button
@@ -689,7 +689,7 @@ export default function InventarioPage() {
         </div>
 
         {/* View Toggle */}
-        <div className="col-12 col-md-auto">
+        <div className="col-12 col-sm-auto">
           <div className="btn-group w-100" role="group">
             <button
               type="button"
@@ -700,7 +700,7 @@ export default function InventarioPage() {
                   setOpenSections(new Set(categories));
                 }
               }}
-              style={{ minHeight: '40px' }}
+              style={{ minHeight: '42px' }}
             >
               <i className="bi bi-collection me-1"></i> Secciones
             </button>
@@ -708,7 +708,7 @@ export default function InventarioPage() {
               type="button"
               className={`btn btn-sm ${viewMode === 'flat' ? 'btn-primary' : 'btn-outline-secondary text-light'}`}
               onClick={() => setViewMode('flat')}
-              style={{ minHeight: '40px' }}
+              style={{ minHeight: '42px' }}
             >
               <i className="bi bi-list-ul me-1"></i> Lista
             </button>
@@ -716,30 +716,30 @@ export default function InventarioPage() {
         </div>
 
         {/* Action Buttons */}
-        <div className="col-12 col-md d-flex justify-content-md-end gap-2 flex-wrap">
+        <div className="col-12 col-xl d-flex justify-content-xl-end gap-2 flex-wrap">
           <button
             type="button"
-            className="btn btn-sm btn-outline-secondary text-light flex-grow-1 flex-md-grow-0 d-flex align-items-center justify-content-center gap-1"
+            className="btn btn-sm btn-outline-secondary text-light flex-fill flex-xl-grow-0 d-flex align-items-center justify-content-center gap-1"
             onClick={() => setShowImportModal(true)}
-            style={{ minHeight: '40px' }}
+            style={{ minHeight: '42px' }}
           >
             <i className="bi bi-file-earmark-arrow-up"></i>
             <span>Importar Excel</span>
           </button>
           <button
             type="button"
-            className="btn btn-sm btn-outline-secondary text-light flex-grow-1 flex-md-grow-0 d-flex align-items-center justify-content-center gap-1"
+            className="btn btn-sm btn-outline-secondary text-light flex-fill flex-xl-grow-0 d-flex align-items-center justify-content-center gap-1"
             onClick={handleExport}
-            style={{ minHeight: '40px' }}
+            style={{ minHeight: '42px' }}
           >
             <i className="bi bi-file-earmark-excel"></i>
             <span>Exportar Excel</span>
           </button>
           <button
             type="button"
-            className="btn btn-sm btn-primary w-100 w-md-auto order-first order-md-last d-flex align-items-center justify-content-center gap-1 fw-bold"
+            className="btn btn-sm btn-primary flex-fill flex-xl-grow-0 order-first order-xl-last d-flex align-items-center justify-content-center gap-1 fw-bold"
             onClick={openAddModal}
-            style={{ minHeight: '44px' }}
+            style={{ minHeight: '42px' }}
           >
             <i className="bi bi-plus-lg"></i>
             <span>Agregar Producto</span>
@@ -838,9 +838,9 @@ export default function InventarioPage() {
                 </div>
 
                 <div className={`category-section-body ${isOpen ? 'open' : ''}`}>
-                  {/* Desktop Table View */}
-                  <div className="table-responsive d-none d-md-block">
-                    <table className="table table-dark table-hover align-middle mb-0">
+                  {/* Desktop Table View (>= 992px) */}
+                  <div className="table-responsive d-none d-lg-block responsive-table-view">
+                    <table className="table table-dark table-hover align-middle mb-0" style={{ minWidth: '650px' }}>
                       <thead>
                         <tr>
                           <th>SKU</th>
@@ -929,9 +929,15 @@ export default function InventarioPage() {
                     </table>
                   </div>
 
-                  {/* Mobile Cards View (Bootstrap 5) */}
-                  <div className="d-block d-md-none p-2">
-                    {prods.map((product) => renderProductMobileCard(product, false))}
+                  {/* Mobile & Tablet Cards View (< 992px) */}
+                  <div className="d-block d-lg-none responsive-cards-view p-2">
+                    <div className="row g-2">
+                      {prods.map((product) => (
+                        <div key={product.id} className="col-12 col-md-6">
+                          {renderProductMobileCard(product, false)}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -941,9 +947,9 @@ export default function InventarioPage() {
       ) : (
         /* ================= VISTA TABLA PLANA ================= */
         <div>
-          {/* Desktop Table View */}
-          <div className="table-responsive d-none d-md-block">
-            <table className="table table-dark table-hover align-middle mb-0">
+          {/* Desktop Table View (>= 992px) */}
+          <div className="table-responsive d-none d-lg-block responsive-table-view">
+            <table className="table table-dark table-hover align-middle mb-0" style={{ minWidth: '720px' }}>
               <thead>
                 <tr>
                   <th>SKU</th>
@@ -1049,9 +1055,15 @@ export default function InventarioPage() {
             </table>
           </div>
 
-          {/* Mobile Cards View (Bootstrap 5) */}
-          <div className="d-block d-md-none py-2">
-            {filteredProducts.map((product) => renderProductMobileCard(product, true))}
+          {/* Mobile & Tablet Cards View (< 992px) */}
+          <div className="d-block d-lg-none responsive-cards-view py-2">
+            <div className="row g-2">
+              {filteredProducts.map((product) => (
+                <div key={product.id} className="col-12 col-md-6 col-xl-4">
+                  {renderProductMobileCard(product, true)}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1059,7 +1071,7 @@ export default function InventarioPage() {
       {/* Modal Agregar / Editar Manual */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
               <h2 className="modal-title">
                 {editProduct ? 'Editar Producto' : 'Nuevo Producto'}
@@ -1136,7 +1148,7 @@ export default function InventarioPage() {
       {/* Modal Importar Excel */}
       {showImportModal && (
         <div className="modal-overlay" onClick={() => !importing && setShowImportModal(false)}>
-          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal-lg" onClick={(e) => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
               <div>
                 <h2 className="modal-title">📤 Importar Inventario desde Excel</h2>
@@ -1259,8 +1271,8 @@ export default function InventarioPage() {
                     <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '14px' }}>
                       ⚙️ Asignación de Columnas del Excel:
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                      <div>
+                    <div className="row g-2">
+                      <div className="col-12 col-sm-6 col-lg-3">
                         <label className="form-label" style={{ fontSize: '12px' }}>Columna SKU / Código *</label>
                         <select
                           className="form-input"
@@ -1274,7 +1286,7 @@ export default function InventarioPage() {
                         </select>
                       </div>
 
-                      <div>
+                      <div className="col-12 col-sm-6 col-lg-3">
                         <label className="form-label" style={{ fontSize: '12px' }}>Columna Nombre / Descripción</label>
                         <select
                           className="form-input"
@@ -1288,7 +1300,7 @@ export default function InventarioPage() {
                         </select>
                       </div>
 
-                      <div>
+                      <div className="col-12 col-sm-6 col-lg-3">
                         <label className="form-label" style={{ fontSize: '12px' }}>Columna Categoría / Grupo</label>
                         <select
                           className="form-input"
@@ -1302,7 +1314,7 @@ export default function InventarioPage() {
                         </select>
                       </div>
 
-                      <div>
+                      <div className="col-12 col-sm-6 col-lg-3">
                         <label className="form-label" style={{ fontSize: '12px' }}>Columna Cantidad / Stock *</label>
                         <select
                           className="form-input"
@@ -1442,8 +1454,8 @@ export default function InventarioPage() {
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                       Vista previa (primeras 5 filas):
                     </div>
-                    <div className="table-container" style={{ maxHeight: '180px', overflowY: 'auto' }}>
-                      <table className="table" style={{ fontSize: '12px' }}>
+                    <div className="table-responsive" style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                      <table className="table table-dark table-hover table-sm mb-0" style={{ fontSize: '12px', minWidth: '400px' }}>
                         <thead>
                           <tr>
                             <th>SKU</th>
