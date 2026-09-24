@@ -24,6 +24,7 @@ import {
   normalizeData,
   consolidateDuplicates,
 } from '../../lib/excelUtils';
+import { isLowStock, getLowStockThreshold } from '../../lib/stockRules';
 
 export default function InventarioPage() {
   const { currentUser } = useAuth();
@@ -144,7 +145,8 @@ export default function InventarioPage() {
     const style = getCategoryStyle(product.category);
     const isNegative = (product.quantity || 0) < 0;
     const isZero = (product.quantity || 0) === 0;
-    const isLow = (product.quantity || 0) > 0 && (product.quantity || 0) < 10;
+    const isLow = isLowStock(product);
+    const threshold = getLowStockThreshold(product.category);
 
     return (
       <div key={product.id} className="card bg-dark border-secondary text-light h-100 shadow-sm" style={{ background: 'rgba(15, 15, 35, 0.95)' }}>
@@ -205,11 +207,15 @@ export default function InventarioPage() {
                 >
                   {product.quantity} uds
                 </span>
-                {isNegative && (
+                {isNegative ? (
                   <span className="badge bg-danger text-light px-2 py-1" style={{ fontSize: '10px' }}>
                     Faltante
                   </span>
-                )}
+                ) : isLow ? (
+                  <span className="badge bg-warning text-dark px-2 py-1 fw-bold" style={{ fontSize: '10px' }}>
+                    ⚠️ Bajo stock (&lt;{threshold} uds)
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -899,10 +905,10 @@ export default function InventarioPage() {
                               <span style={{
                                 fontWeight: 700,
                                 fontSize: 'var(--font-size-md)',
-                                color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
+                                color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : isLowStock(product) ? 'var(--warning)' : 'var(--text-primary)',
                               }}>
                                 {product.quantity}
-                                {product.quantity < 0 && (
+                                {product.quantity < 0 ? (
                                   <span style={{
                                     display: 'inline-block',
                                     marginLeft: '8px',
@@ -915,7 +921,20 @@ export default function InventarioPage() {
                                   }}>
                                     Faltante
                                   </span>
-                                )}
+                                ) : isLowStock(product) ? (
+                                  <span style={{
+                                    display: 'inline-block',
+                                    marginLeft: '8px',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    background: 'var(--warning-bg)',
+                                    color: 'var(--warning)',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                  }}>
+                                    Bajo (&lt;{getLowStockThreshold(product.category)})
+                                  </span>
+                                ) : null}
                               </span>
                             </td>
                             <td>
@@ -1024,10 +1043,10 @@ export default function InventarioPage() {
                         <span style={{
                           fontWeight: 700,
                           fontSize: 'var(--font-size-md)',
-                          color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : product.quantity < 10 ? 'var(--warning)' : 'var(--text-primary)',
+                          color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : isLowStock(product) ? 'var(--warning)' : 'var(--text-primary)',
                         }}>
                           {product.quantity}
-                          {product.quantity < 0 && (
+                          {product.quantity < 0 ? (
                             <span style={{
                               display: 'inline-block',
                               marginLeft: '8px',
@@ -1040,7 +1059,20 @@ export default function InventarioPage() {
                             }}>
                               Faltante
                             </span>
-                          )}
+                          ) : isLowStock(product) ? (
+                            <span style={{
+                              display: 'inline-block',
+                              marginLeft: '8px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              background: 'var(--warning-bg)',
+                              color: 'var(--warning)',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                            }}>
+                              Bajo (&lt;{getLowStockThreshold(product.category)})
+                            </span>
+                          ) : null}
                         </span>
                       </td>
                       <td>

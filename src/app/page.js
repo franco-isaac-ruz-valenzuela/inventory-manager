@@ -5,6 +5,7 @@ import { db } from '../lib/firebase';
 import { collection, query, orderBy, limit, onSnapshot, getCountFromServer } from 'firebase/firestore';
 import { timeAgo } from '../lib/notifications';
 import { getActionStyle, getActionMessage } from '../lib/auditLog';
+import { isLowStock } from '../lib/stockRules';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
@@ -23,7 +24,7 @@ export default function DashboardPage() {
       snapshot.forEach((doc) => {
         total++;
         const data = doc.data();
-        if (data.quantity <= 5) low++;
+        if (isLowStock(data)) low++;
       });
       setStats((prev) => ({ ...prev, totalProducts: total, lowStock: low }));
       setLoading(false);
@@ -87,7 +88,10 @@ export default function DashboardPage() {
           <div className="stat-value" style={{ color: stats.lowStock > 0 ? 'var(--warning)' : 'inherit' }}>
             {stats.lowStock}
           </div>
-          <div className="stat-label">Stock bajo (≤5 uds)</div>
+          <div className="stat-label">Stock bajo (por categoría)</div>
+          <div className="text-secondary mt-1" style={{ fontSize: '11px', lineHeight: 1.3 }}>
+            Onduladas/Alveolar &lt;50 • Perfiles &lt;100 • Industrial &lt;20 • Compacto &lt;3 • Accesorios/Rollos &lt;5
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon icon-purple">

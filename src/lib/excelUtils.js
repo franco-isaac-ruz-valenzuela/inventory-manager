@@ -1,4 +1,5 @@
 import * as XLSX from '@e965/xlsx';
+import { isLowStock } from './stockRules';
 
 /**
  * Patrones para detectar si una fila contiene headers de tabla.
@@ -704,12 +705,12 @@ export function exportInventoryToExcel(products, filename = 'inventario.xlsx') {
         lastUpd,
         '',
       ]);
-      allStyleRows.push({
-        row: allRows.length - 1,
-        type: 'data',
-        warning: p.quantity <= 5,
-        negative: p.quantity < 0,
-      });
+        allStyleRows.push({
+          row: allRows.length - 1,
+          type: 'data',
+          warning: isLowStock(p),
+          negative: p.quantity < 0,
+        });
     });
 
     // Subtotal
@@ -869,15 +870,15 @@ export function exportInventoryToExcel(products, filename = 'inventario.xlsx') {
       const rowNum = 5 + i;
       const p = sorted[i];
       ['A', 'B', 'C', 'D'].forEach((col) => {
-        const isQty = col === 'C';
-        const fontColor = p.quantity < 0 ? 'C62828' : p.quantity <= 5 ? 'E65100' : '333333';
+        const low = isLowStock(p);
+        const fontColor = p.quantity < 0 ? 'C62828' : low ? 'E65100' : '333333';
         applyCellStyle(wsCat, `${col}${rowNum}`, {
           font: { sz: 10, color: { rgb: fontColor }, bold: isQty },
           border: STYLES.border,
           alignment: { horizontal: isQty ? 'center' : 'left' },
           fill: p.quantity < 0
             ? { fgColor: { rgb: 'FFEBEE' } }
-            : p.quantity <= 5
+            : low
               ? { fgColor: { rgb: 'FFF8E1' } }
               : undefined,
         });
