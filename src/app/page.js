@@ -1,18 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, limit, onSnapshot, getCountFromServer } from 'firebase/firestore';
 import { timeAgo } from '../lib/notifications';
 import { getActionStyle, getActionMessage } from '../lib/auditLog';
-import { isLowStock } from '../lib/stockRules';
+import { isLowStock, getLowStockThreshold } from '../lib/stockRules';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
     totalProducts: 0,
     lowStock: 0,
+    lowStockByCategory: {},
     sessions: 0,
   });
+  const [showLowStockModal, setShowLowStockModal] = useState(false);
   const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -21,12 +24,17 @@ export default function DashboardPage() {
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
       let total = 0;
       let low = 0;
+      const byCat = {};
       snapshot.forEach((doc) => {
         total++;
         const data = doc.data();
-        if (isLowStock(data)) low++;
+        if (isLowStock(data)) {
+          low++;
+          const cat = (data.category || 'SIN CATEGORÍA').toUpperCase();
+          byCat[cat] = (byCat[cat] || 0) + 1;
+        }
       });
-      setStats((prev) => ({ ...prev, totalProducts: total, lowStock: low }));
+      setStats((prev) => ({ ...prev, totalProducts: total, lowStock: low, lowStockByCategory: byCat }));
       setLoading(false);
     });
 
@@ -81,9 +89,19 @@ export default function DashboardPage() {
           <div className="stat-value">{stats.totalProducts}</div>
           <div className="stat-label">Productos totales</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon icon-amber">
-            <i className="bi bi-exclamation-triangle-fill"></i>
+        <div
+          className="stat-card"
+          onClick={() => setShowLowStockModal(true)}
+          style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
+          title="Haz clic para ver el desglose por categoría"
+        >
+          <div className="d-flex justify-content-between align-items-start">
+            <div className="stat-icon icon-amber">
+              <i className="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            <span className="badge bg-warning text-dark font-monospace" style={{ fontSize: '10px' }}>
+              Ver detalle →
+            </span>
           </div>
           <div className="stat-value" style={{ color: stats.lowStock > 0 ? 'var(--warning)' : 'inherit' }}>
             {stats.lowStock}
@@ -168,6 +186,56 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Desglose Stock Bajo por Categoría */}
+      {showLowStockModal && (
+        <div className="modal-overlay" onClick={() => setShowLowStockModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', maxWidth: '520px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 className="modal-title">⚠️ Stock Bajo por Categoría</h2>
+                <p className="text-secondary small mb-0 mt-1">
+                  Total de {stats.lowStock} productos que requieren reposición
+                </p>
+              </div>
+              <button className="modal-close" onClick={() => setShowLowStockModal(false)}>
+                ✕
+              </button>
+            </div>
+            <div className="modal-body p-3">
+              <div className="list-group list-group-flush mb-3">
+                {Object.entries(stats.lowStockByCategory || {})
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([cat, count]) => {
+                    const threshold = getLowStockThreshold(cat);
+                    return (
+                      <div key={cat} className="list-group-item bg-dark border-secondary text-light d-flex justify-content-between align-items-center py-2 px-3">
+                        <div>
+                          <strong className="d-block text-truncate" style={{ maxWidth: '280px' }}>{cat}</strong>
+                          <small className="text-secondary">Alerta si hay &lt; {threshold} uds</small>
+                        </div>
+                        <span className="badge bg-warning text-dark fs-6 px-3 py-1 font-monospace">
+                          {count} {count === 1 ? 'producto' : 'productos'}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+              <div className="p-2 rounded text-secondary small" style={{ background: 'rgba(255, 255, 255, 0.03)', fontSize: '12px' }}>
+                💡 <em>Pinturas y Adhesivos están configuradas para no alertar según las reglas del negocio.</em>
+              </div>
+            </div>
+            <div className="modal-footer d-flex gap-2">
+              <button type="button" className="btn btn-secondary flex-grow-1" onClick={() => setShowLowStockModal(false)} style={{ minHeight: '40px' }}>
+                Cerrar
+              </button>
+              <Link href="/inventario" className="btn btn-primary flex-grow-1 text-center text-decoration-none d-flex align-items-center justify-content-center" style={{ minHeight: '40px' }}>
+                Ir a Inventario
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
