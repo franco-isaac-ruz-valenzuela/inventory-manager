@@ -31,6 +31,7 @@ export default function InventarioPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [editProduct, setEditProduct] = useState(null);
   const [formData, setFormData] = useState({ sku: '', name: '', quantity: '', category: '' });
   const [stockEditMode, setStockEditMode] = useState('add'); // 'add' | 'set'
   const [quantityToAdd, setQuantityToAdd] = useState('');
