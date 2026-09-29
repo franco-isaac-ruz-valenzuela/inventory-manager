@@ -18,7 +18,7 @@ import { sendNotification } from '../../lib/notifications';
 import BarcodeScanner from '../../components/BarcodeScanner';
 
 export default function EscanerPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, canEdit } = useAuth();
   const [scannedCode, setScannedCode] = useState('');
   const [product, setProduct] = useState(null);
   const [notFound, setNotFound] = useState(false);
@@ -66,33 +66,39 @@ export default function EscanerPage() {
 
   const handleQuantityChange = async (delta) => {
     if (!product || updating) return;
+    if (!canEdit) {
+      alert('Solo Franco y M.silva tienen permisos para modificar el inventario.');
+      return;
+    }
     setUpdating(true);
 
-    const newQty = (product.quantity || 0) + delta;
+    const currentQty = Number(product.quantity) || 0;
+    const newQty = currentQty + delta;
 
     try {
       await updateDoc(doc(db, 'products', product.id), {
         quantity: newQty,
         lastUpdated: serverTimestamp(),
-        updatedBy: currentUser.uid,
+        updatedBy: currentUser?.uid || 'anon',
       });
 
       const action = delta > 0 ? 'cantidad_agregada' : 'cantidad_descontada';
       await logAction(action, currentUser, {
         sku: product.sku,
         productName: product.name,
-        previousValue: product.quantity,
+        previousValue: currentQty,
         newValue: newQty,
       });
 
       const msg = delta > 0
-        ? `${currentUser.displayName || currentUser.email} agregó ${delta} uds a ${product.sku} (${product.name})`
-        : `${currentUser.displayName || currentUser.email} descontó ${Math.abs(delta)} uds de ${product.sku} (${product.name})`;
+        ? `${currentUser?.displayName || currentUser?.email || 'Usuario'} agregó ${delta} uds a ${product.sku} (${product.name})`
+        : `${currentUser?.displayName || currentUser?.email || 'Usuario'} descontó ${Math.abs(delta)} uds de ${product.sku} (${product.name})`;
       await sendNotification(delta > 0 ? 'agregado' : 'descuento', msg, currentUser);
 
       setProduct((prev) => ({ ...prev, quantity: newQty }));
     } catch (error) {
       console.error('Error actualizando cantidad:', error);
+      alert('Error al modificar cantidad: ' + error.message);
     }
 
     setUpdating(false);
@@ -108,6 +114,10 @@ export default function EscanerPage() {
 
   const handleCreateProduct = async (e) => {
     e.preventDefault();
+    if (!canEdit) {
+      alert('Solo Franco y M.silva tienen permisos para crear nuevos productos.');
+      return;
+    }
     if (!newProductName.trim() || !scannedCode || creating) return;
     setCreating(true);
 
@@ -222,7 +232,8 @@ export default function EscanerPage() {
                     </p>
                   </div>
 
-                  <form onSubmit={handleCreateProduct} style={{
+                  {canEdit ? (
+                    <form onSubmit={handleCreateProduct} style={{
                     background: 'var(--bg-glass)',
                     padding: '20px',
                     borderRadius: 'var(--radius-md)',
@@ -293,8 +304,22 @@ export default function EscanerPage() {
                       )}
                     </button>
                   </form>
-                </div>
-              ) : product ? (
+                ) : (
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '16px',
+                    textAlign: 'center',
+                    color: 'var(--text-secondary)',
+                    fontSize: '13px',
+                  }}>
+                    <i className="bi bi-shield-lock" style={{ fontSize: '1.5rem', display: 'block', marginBottom: '8px', color: '#f59e0b' }}></i>
+                    Modo consulta: Solo los administradores autorizados (Franco y M.silva) pueden registrar nuevos productos.
+                  </div>
+                )}
+              </div>
+            ) : product ? (
                 <div>
                   <div style={{ marginBottom: '16px' }}>
                     <span className="badge badge-success" style={{ marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -323,7 +348,8 @@ export default function EscanerPage() {
                       <button
                         className="quantity-btn minus"
                         onClick={() => handleQuantityChange(-1)}
-                        disabled={updating}
+                        disabled={updating || !canEdit}
+                        title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Restar 1'}
                       >
                         −
                       </button>
@@ -351,41 +377,48 @@ export default function EscanerPage() {
                       <button
                         className="quantity-btn plus"
                         onClick={() => handleQuantityChange(1)}
-                        disabled={updating}
+                        disabled={updating || !canEdit}
+                        title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Sumar 1'}
                       >
                         +
                       </button>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '16px', justifyContent: 'center' }}>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleQuantityChange(-5)}
-                        disabled={updating}
-                      >
-                        -5
-                      </button>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleQuantityChange(-10)}
-                        disabled={updating}
-                      >
-                        -10
-                      </button>
-                      <button
-                        className="btn btn-success btn-sm"
-                        onClick={() => handleQuantityChange(5)}
-                        disabled={updating}
-                      >
-                        +5
-                      </button>
-                      <button
-                        className="btn btn-success btn-sm"
-                        onClick={() => handleQuantityChange(10)}
-                        disabled={updating}
-                      >
-                        +10
-                      </button>
-                    </div>
+                    {canEdit ? (
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '16px', justifyContent: 'center' }}>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleQuantityChange(-5)}
+                          disabled={updating}
+                        >
+                          -5
+                        </button>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleQuantityChange(-10)}
+                          disabled={updating}
+                        >
+                          -10
+                        </button>
+                        <button
+                          className="btn btn-success btn-sm"
+                          onClick={() => handleQuantityChange(5)}
+                          disabled={updating}
+                        >
+                          +5
+                        </button>
+                        <button
+                          className="btn btn-success btn-sm"
+                          onClick={() => handleQuantityChange(10)}
+                          disabled={updating}
+                        >
+                          +10
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-secondary small mt-3" style={{ fontSize: '11px' }}>
+                        <i className="bi bi-shield-lock me-1"></i> Modo consulta: Solo Franco y M.silva pueden ajustar cantidades.
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}

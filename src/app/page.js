@@ -123,7 +123,7 @@ export default function DashboardPage() {
           </div>
           <div className="stat-label">Stock bajo (por categoría)</div>
           <div className="text-secondary mt-1" style={{ fontSize: '11px', lineHeight: 1.3 }}>
-            Onduladas/Alveolar &lt;50 • Perfiles &lt;100 • Industrial &lt;20 • Compacto &lt;3 • Accesorios/Rollos &lt;5
+            Onduladas/Alveolar &lt;50 • Perfiles &lt;30 • Industrial &lt;20 • Compacto &lt;3 • Accesorios/Rollos &lt;5
           </div>
         </div>
         <div className="stat-card">

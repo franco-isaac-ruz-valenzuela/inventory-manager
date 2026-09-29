@@ -9,6 +9,7 @@ import { exportHistoryToExcel } from '../../lib/excelUtils';
 
 const actionTypes = [
   { value: 'all', label: 'Todas', icon: 'bi bi-list-ul' },
+  { value: 'descuento_nota_pedido', label: 'Notas de Pedido', icon: 'bi bi-receipt' },
   { value: 'producto_agregado', label: 'Agregados / Creados', icon: 'bi bi-plus-circle' },
   { value: 'producto_editado', label: 'Editados', icon: 'bi bi-pencil-square' },
   { value: 'producto_eliminado', label: 'Eliminados', icon: 'bi bi-trash3' },
@@ -84,6 +85,8 @@ export default function HistorialPage() {
         details.sku?.toLowerCase().includes(s) ||
         details.productName?.toLowerCase().includes(s) ||
         details.description?.toLowerCase().includes(s) ||
+        details.notaPedido?.toLowerCase().includes(s) ||
+        details.cliente?.toLowerCase().includes(s) ||
         log.userName?.toLowerCase().includes(s)
       );
     }

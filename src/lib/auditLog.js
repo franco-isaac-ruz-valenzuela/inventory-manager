@@ -23,6 +23,8 @@ export async function logAction(action, user, details = {}) {
         previousValue: details.previousValue ?? null,
         newValue: details.newValue ?? null,
         description: details.description || '',
+        notaPedido: details.notaPedido || '',
+        cliente: details.cliente || '',
       },
     });
   } catch (error) {
@@ -47,6 +49,7 @@ export function getActionMessage(action, userName, details = {}) {
     producto_agregado: `${userName} agregó el producto ${product}${next != null ? ` con stock de ${next} uds` : ''}`,
     producto_editado: `${userName} editó el producto ${product}${details.description ? ` (${details.description})` : ''}`,
     producto_eliminado: `${userName} eliminó el producto ${product}`,
+    descuento_nota_pedido: `${userName} descontó ${diff} uds de ${product} por Nota de Pedido #${details.notaPedido || 'S/N'}${details.cliente ? ` (${details.cliente})` : ''}${prev != null && next != null ? ` (${prev} → ${next})` : ''}`,
     cantidad_descontada: `${userName} descontó ${diff} uds de ${product}${prev != null && next != null ? ` (${prev} → ${next})` : ''}`,
     cantidad_agregada: `${userName} agregó ${diff} uds a ${product}${prev != null && next != null ? ` (${prev} → ${next})` : ''}`,
     escaneo: `${userName} escaneó el producto ${product}`,
@@ -73,6 +76,7 @@ export function getActionStyle(action) {
     producto_agregado: { color: '#10b981', icon: 'bi bi-plus-circle-fill', label: 'Agregado' },
     producto_editado: { color: '#f59e0b', icon: 'bi bi-pencil-square', label: 'Editado' },
     producto_eliminado: { color: '#ef4444', icon: 'bi bi-trash3-fill', label: 'Eliminado' },
+    descuento_nota_pedido: { color: '#f59e0b', icon: 'bi bi-receipt', label: 'Nota de Pedido' },
     cantidad_descontada: { color: '#ef4444', icon: 'bi bi-dash-circle-fill', label: 'Descontado' },
     cantidad_agregada: { color: '#10b981', icon: 'bi bi-plus-circle-fill', label: 'Agregado Stock' },
     escaneo: { color: '#3b82f6', icon: 'bi bi-upc-scan', label: 'Escaneo' },

@@ -24,10 +24,10 @@ import {
   normalizeData,
   consolidateDuplicates,
 } from '../../lib/excelUtils';
-import { isLowStock, getLowStockThreshold } from '../../lib/stockRules';
+import { isLowStock, getLowStockThreshold, isProductIgnoredFromStock } from '../../lib/stockRules';
 
 export default function InventarioPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, canEdit } = useAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -36,11 +36,26 @@ export default function InventarioPage() {
   const [formData, setFormData] = useState({ sku: '', name: '', quantity: '', category: '' });
   const [stockEditMode, setStockEditMode] = useState('add'); // 'add' | 'set'
   const [quantityToAdd, setQuantityToAdd] = useState('');
+  const [modalNotaPedido, setModalNotaPedido] = useState('');
+  const [updatingProductIds, setUpdatingProductIds] = useState(new Set());
 
-  // Estados para Categorías
+  // Estados para Categorías y Filtro por Tipo
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedType, setSelectedType] = useState('all'); // 'all' | 'planchas' | 'perfiles' | 'accesorios' | 'rollos' | 'pinturas' | 'bajo_stock' | 'faltantes' | 'sin_stock' | 'ignorados'
   const [viewMode, setViewMode] = useState('flat'); // 'flat' | 'grouped'
   const [openSections, setOpenSections] = useState(new Set());
+
+  // Estados para Descontar por Nota de Pedido
+  const [showNotaPedidoModal, setShowNotaPedidoModal] = useState(false);
+  const [npNumber, setNpNumber] = useState('');
+  const [npCliente, setNpCliente] = useState('');
+  const [npItems, setNpItems] = useState([]);
+  const [npSearch, setNpSearch] = useState('');
+  const [npSubmitting, setNpSubmitting] = useState(false);
+  const [npError, setNpError] = useState('');
+  const [npSuccess, setNpSuccess] = useState('');
+  const [npPasteText, setNpPasteText] = useState('');
+  const [npInputMode, setNpInputMode] = useState('list'); // 'list' | 'paste'
 
   // Estados para Importar Excel
   const [showImportModal, setShowImportModal] = useState(false);
@@ -112,16 +127,98 @@ export default function InventarioPage() {
     return CATEGORY_COLORS[upper] || CATEGORY_COLORS['SIN CATEGORÍA'];
   };
 
+  // Conteos calculados para el filtro por tipo
+  const typeCounts = {
+    all: products.length,
+    planchas: products.filter((p) => {
+      const c = (p.category || '').toUpperCase();
+      const n = (p.name || '').toUpperCase();
+      return (
+        c.includes('ONDULAD') ||
+        c.includes('GRECA') ||
+        c.includes('ALVEOLAR') ||
+        c.includes('COMPACT') ||
+        c.includes('INDUSTRI') ||
+        c.includes('PLANCHA') ||
+        n.includes('ONDULAD') ||
+        n.includes('GRECA') ||
+        n.includes('ALVEOLAR') ||
+        n.includes('PLANCHA')
+      );
+    }).length,
+    perfiles: products.filter((p) => {
+      const c = (p.category || '').toUpperCase();
+      const n = (p.name || '').toUpperCase();
+      return c.includes('PERFIL') || n.includes('PERFIL');
+    }).length,
+    accesorios: products.filter((p) => {
+      const c = (p.category || '').toUpperCase();
+      const n = (p.name || '').toUpperCase();
+      return c.includes('ACCESORIO') || c.includes('CANALETA') || n.includes('TORNILL') || n.includes('GOLILLA');
+    }).length,
+    rollos: products.filter((p) => (p.category || '').toUpperCase().includes('ROLLO')).length,
+    bajo_stock: products.filter((p) => isLowStock(p)).length,
+    faltantes: products.filter((p) => (Number(p.quantity) || 0) < 0).length,
+    sin_stock: products.filter((p) => (Number(p.quantity) || 0) === 0).length,
+    ignorados: products.filter((p) => isProductIgnoredFromStock(p)).length,
+  };
+
   const filteredProducts = products.filter((p) => {
     const s = search.toLowerCase();
     const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
+    const name = (p.name || '').toUpperCase();
+
     const matchesSearch =
       p.sku?.toLowerCase().includes(s) ||
       p.name?.toLowerCase().includes(s) ||
       cat.toLowerCase().includes(s);
+
     const matchesCategory =
       selectedCategory === 'all' || cat === selectedCategory;
-    return matchesSearch && matchesCategory;
+
+    let matchesType = true;
+    if (selectedType === 'planchas') {
+      matchesType =
+        cat.includes('ONDULAD') ||
+        cat.includes('GRECA') ||
+        cat.includes('ALVEOLAR') ||
+        cat.includes('COMPACT') ||
+        cat.includes('INDUSTRI') ||
+        cat.includes('PLANCHA') ||
+        name.includes('ONDULAD') ||
+        name.includes('GRECA') ||
+        name.includes('ALVEOLAR') ||
+        name.includes('COMPACT') ||
+        name.includes('PLANCHA');
+    } else if (selectedType === 'perfiles') {
+      matchesType = cat.includes('PERFIL') || name.includes('PERFIL');
+    } else if (selectedType === 'accesorios') {
+      matchesType =
+        cat.includes('ACCESORIO') ||
+        cat.includes('CANALETA') ||
+        name.includes('TORNILL') ||
+        name.includes('GOLILLA');
+    } else if (selectedType === 'rollos') {
+      matchesType = cat.includes('ROLLO') || name.includes('ROLLO');
+    } else if (selectedType === 'pinturas') {
+      matchesType =
+        cat.includes('PINTUR') ||
+        cat.includes('ADHESIV') ||
+        name.includes('PINTUR') ||
+        name.includes('SILICONA');
+    } else if (selectedType === 'bajo_stock') {
+      matchesType = isLowStock(p);
+    } else if (selectedType === 'faltantes') {
+      matchesType = (Number(p.quantity) || 0) < 0;
+    } else if (selectedType === 'sin_stock') {
+      matchesType = (Number(p.quantity) || 0) === 0;
+    } else if (selectedType === 'ignorados') {
+      matchesType = isProductIgnoredFromStock(p);
+    } else if (selectedType !== 'all') {
+      matchesType = cat === selectedType;
+    }
+
+    return matchesSearch && matchesCategory && matchesType;
   });
 
   // Agrupación por categoría para vista agrupada
@@ -143,10 +240,13 @@ export default function InventarioPage() {
 
   const renderProductMobileCard = (product, showCategory = false) => {
     const style = getCategoryStyle(product.category);
-    const isNegative = (product.quantity || 0) < 0;
-    const isZero = (product.quantity || 0) === 0;
-    const isLow = isLowStock(product);
-    const threshold = getLowStockThreshold(product.category);
+    const qty = Number(product.quantity) || 0;
+    const isNegative = qty < 0;
+    const isZero = qty === 0;
+    const isIgnored = isProductIgnoredFromStock(product);
+    const isLow = !isIgnored && isLowStock(product);
+    const threshold = isIgnored ? null : getLowStockThreshold(product.category, product);
+    const isUpdating = updatingProductIds.has(product.id);
 
     return (
       <div key={product.id} className="card bg-dark border-secondary text-light h-100 shadow-sm" style={{ background: 'rgba(15, 15, 35, 0.95)' }}>
@@ -200,9 +300,15 @@ export default function InventarioPage() {
               </small>
               <div className="d-flex align-items-center gap-2 mt-1">
                 <span
-                  className="fw-bold fs-5"
+                  className="fw-bold fs-5 font-monospace"
                   style={{
-                    color: isNegative ? 'var(--danger, #ef4444)' : isZero || isLow ? 'var(--warning, #f59e0b)' : 'var(--text-primary, #f0f0f5)',
+                    color: isNegative
+                      ? 'var(--danger, #ef4444)'
+                      : isZero
+                      ? (isIgnored ? 'var(--text-secondary, #94a3b8)' : 'var(--warning, #f59e0b)')
+                      : isLow
+                      ? 'var(--warning, #f59e0b)'
+                      : 'var(--text-primary, #f0f0f5)',
                   }}
                 >
                   {product.quantity} uds
@@ -215,20 +321,26 @@ export default function InventarioPage() {
                   <span className="badge bg-warning text-dark px-2 py-1 fw-bold" style={{ fontSize: '10px' }}>
                     ⚠️ Bajo stock (&lt;{threshold} uds)
                   </span>
+                ) : isIgnored ? (
+                  <span className="badge bg-secondary text-light px-2 py-1" style={{ fontSize: '10px', opacity: 0.8 }} title="Ignorado de alertas de stock">
+                    Sin alerta
+                  </span>
                 ) : null}
               </div>
             </div>
 
-            {/* Stepper Buttons (44x44px touch targets) */}
+            {/* Stepper Buttons (44x44px touch targets para tablet y móvil) */}
             <div className="btn-group" role="group" aria-label="Ajustar stock">
               <button
                 type="button"
                 className="btn btn-outline-secondary text-light fw-bold fs-5 px-3 py-2"
                 onClick={() => handleQuantityChange(product, -1)}
+                disabled={!canEdit || isUpdating}
                 style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 aria-label="Restar 1"
+                title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Restar 1'}
               >
-                −
+                {isUpdating ? '...' : '−'}
               </button>
               <span
                 className="btn btn-dark text-light fw-bold disabled fs-6 px-2 py-2"
@@ -240,60 +352,72 @@ export default function InventarioPage() {
                 type="button"
                 className="btn btn-outline-info text-info fw-bold fs-5 px-3 py-2"
                 onClick={() => handleQuantityChange(product, 1)}
+                disabled={!canEdit || isUpdating}
                 style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 aria-label="Sumar 1"
+                title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Sumar 1'}
               >
-                +
+                {isUpdating ? '...' : '+'}
               </button>
             </div>
           </div>
 
-          {/* Acciones: Editar y Eliminar */}
-          <div className="d-flex gap-2">
-            <button
-              type="button"
-              className="btn btn-outline-secondary text-light btn-sm flex-grow-1 py-2 fw-semibold d-flex align-items-center justify-content-center gap-2"
-              onClick={() => openEditModal(product)}
-              style={{ minHeight: '42px' }}
-            >
-              <i className="bi bi-pencil-square"></i> Editar
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-danger btn-sm px-3 py-2 d-flex align-items-center justify-content-center"
-              onClick={() => handleDelete(product)}
-              title="Eliminar producto"
-              aria-label="Eliminar producto"
-              style={{ minWidth: '44px', minHeight: '42px' }}
-            >
-              <i className="bi bi-trash3"></i>
-            </button>
-          </div>
+          {/* Acciones: Editar y Eliminar o Solo Lectura */}
+          {canEdit ? (
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary text-light btn-sm flex-grow-1 py-2 fw-semibold d-flex align-items-center justify-content-center gap-2"
+                onClick={() => openEditModal(product)}
+                style={{ minHeight: '42px' }}
+              >
+                <i className="bi bi-pencil-square"></i> Editar
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm px-3 py-2 d-flex align-items-center justify-content-center"
+                onClick={() => handleDelete(product)}
+                title="Eliminar producto"
+                aria-label="Eliminar producto"
+                style={{ minWidth: '44px', minHeight: '42px' }}
+              >
+                <i className="bi bi-trash3"></i>
+              </button>
+            </div>
+          ) : (
+            <div className="text-secondary small text-center py-2 rounded" style={{ fontSize: '12px', background: 'rgba(255,255,255,0.03)' }}>
+              <i className="bi bi-shield-lock me-1"></i> Modo consulta (solo lectura)
+            </div>
+          )}
         </div>
       </div>
     );
   };
 
   const evaluateMathInput = (val) => {
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
     if (!val || typeof val !== 'string') return 0;
     const trimmed = val.trim();
     if (!trimmed) return 0;
-    if (/^[+-]?\d+([+-]\d+)*$/.test(trimmed.replace(/\s+/g, ''))) {
+    // Soporte para comas decimales ej: 27,5 -> 27.5
+    const normalized = trimmed.replace(/,/g, '.').replace(/\s+/g, '');
+    if (/^[+-]?\d+(\.\d+)?([+-]\d+(\.\d+)?)*$/.test(normalized)) {
       try {
-        const tokens = trimmed.match(/[+-]?\s*\d+/g);
+        const tokens = normalized.match(/[+-]?[0-9]+(\.[0-9]+)?/g);
         if (tokens) {
-          return tokens.reduce((sum, t) => sum + parseInt(t.replace(/\s+/g, ''), 10), 0);
+          const sum = tokens.reduce((acc, t) => acc + parseFloat(t), 0);
+          return Math.round(sum * 100) / 100;
         }
       } catch {
-        return parseInt(trimmed, 10) || 0;
+        return parseFloat(normalized) || 0;
       }
     }
-    return parseInt(trimmed, 10) || 0;
+    return parseFloat(normalized) || 0;
   };
 
-  const currentBaseQty = editProduct ? (editProduct.quantity || 0) : 0;
+  const currentBaseQty = editProduct ? (Number(editProduct.quantity) || 0) : 0;
   const parsedAddQty = evaluateMathInput(quantityToAdd);
-  const calculatedQtyFromAdd = currentBaseQty + parsedAddQty;
+  const calculatedQtyFromAdd = Math.round((currentBaseQty + parsedAddQty) * 100) / 100;
   const calculatedQtyFromSet = evaluateMathInput(formData.quantity);
 
   const openAddModal = () => {
@@ -301,6 +425,7 @@ export default function InventarioPage() {
     setFormData({ sku: '', name: '', quantity: '', category: '' });
     setStockEditMode('set');
     setQuantityToAdd('');
+    setModalNotaPedido('');
     setShowModal(true);
   };
 
@@ -314,11 +439,16 @@ export default function InventarioPage() {
     });
     setStockEditMode('add');
     setQuantityToAdd('');
+    setModalNotaPedido('');
     setShowModal(true);
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (!canEdit) {
+      alert('Solo Franco y M.silva tienen permisos para editar productos.');
+      return;
+    }
     const cleanSku = formData.sku.trim().slice(0, 100);
     const cleanName = formData.name.trim().slice(0, 200);
     const cleanCategory = (formData.category || 'SIN CATEGORÍA').trim().toUpperCase();
@@ -331,19 +461,24 @@ export default function InventarioPage() {
     try {
       if (editProduct) {
         // Editar
-        const prevQty = editProduct.quantity;
+        const prevQty = Number(editProduct.quantity) || 0;
         await updateDoc(doc(db, 'products', editProduct.id), {
           sku: cleanSku,
           name: cleanName,
           category: cleanCategory,
           quantity: qty,
           lastUpdated: serverTimestamp(),
-          updatedBy: currentUser.uid,
+          updatedBy: currentUser?.uid || 'anon',
         });
 
-        const action = qty !== prevQty
-          ? (qty > prevQty ? 'cantidad_agregada' : 'cantidad_descontada')
-          : 'producto_editado';
+        const isDeduction = qty < prevQty;
+        const isAddition = qty > prevQty;
+        const diff = Math.abs(qty - prevQty);
+        const hasNota = modalNotaPedido.trim().length > 0;
+
+        const action = hasNota && isDeduction
+          ? 'descuento_nota_pedido'
+          : (isAddition ? 'cantidad_agregada' : (isDeduction ? 'cantidad_descontada' : 'producto_editado'));
 
         await logAction(action, currentUser, {
           sku: cleanSku,
@@ -351,15 +486,19 @@ export default function InventarioPage() {
           category: cleanCategory,
           previousValue: prevQty,
           newValue: qty,
-          description: `Editó ${cleanSku} (${cleanName})`,
+          notaPedido: modalNotaPedido.trim(),
+          description: hasNota && isDeduction
+            ? `Descuento por Nota de Pedido #${modalNotaPedido.trim()}: ${diff} uds de ${cleanSku}`
+            : (qty !== prevQty ? `${isAddition ? 'Sumó' : 'Descontó'} ${diff} uds a ${cleanSku} (${cleanName})` : `Editó ${cleanSku} (${cleanName})`),
         });
 
         if (qty !== prevQty) {
-          const diff = qty - prevQty;
-          const msg = diff > 0
-            ? `${currentUser.displayName || currentUser.email} agregó ${diff} uds a ${cleanSku} (${cleanName})`
-            : `${currentUser.displayName || currentUser.email} descontó ${Math.abs(diff)} uds de ${cleanSku} (${cleanName})`;
-          await sendNotification(diff > 0 ? 'agregado' : 'descuento', msg, currentUser);
+          const msg = hasNota && isDeduction
+            ? `${currentUser?.displayName || currentUser?.email || 'Usuario'} descontó ${diff} uds de ${cleanSku} por Nota de Pedido #${modalNotaPedido.trim()}`
+            : (isAddition
+              ? `${currentUser?.displayName || currentUser?.email || 'Usuario'} agregó ${diff} uds a ${cleanSku} (${cleanName})`
+              : `${currentUser?.displayName || currentUser?.email || 'Usuario'} descontó ${diff} uds de ${cleanSku} (${cleanName})`);
+          await sendNotification(isAddition ? 'agregado' : 'descuento', msg, currentUser);
         }
       } else {
         // Crear
@@ -370,7 +509,7 @@ export default function InventarioPage() {
           quantity: qty,
           createdAt: serverTimestamp(),
           lastUpdated: serverTimestamp(),
-          updatedBy: currentUser.uid,
+          updatedBy: currentUser?.uid || 'anon',
         });
 
         await logAction('producto_creado', currentUser, {
@@ -383,18 +522,24 @@ export default function InventarioPage() {
 
         await sendNotification(
           'creado',
-          `${currentUser.displayName || currentUser.email} agregó nuevo producto ${cleanSku} (${cleanName})`,
+          `${currentUser?.displayName || currentUser?.email || 'Usuario'} agregó nuevo producto ${cleanSku} (${cleanName})`,
           currentUser
         );
       }
 
       setShowModal(false);
+      setModalNotaPedido('');
     } catch (error) {
       console.error('Error guardando producto:', error);
+      alert('Error al guardar producto: ' + error.message);
     }
   };
 
   const handleDelete = async (product) => {
+    if (!canEdit) {
+      alert('Solo Franco y M.silva tienen permisos para eliminar productos.');
+      return;
+    }
     if (!confirm(`¿Estás seguro de eliminar "${product.name}" (${product.sku})?`)) {
       return;
     }
@@ -411,37 +556,205 @@ export default function InventarioPage() {
 
       await sendNotification(
         'eliminado',
-        `⚠️ ${currentUser.displayName || currentUser.email} eliminó ${product.sku} (${product.name})`,
+        `⚠️ ${currentUser?.displayName || currentUser?.email || 'Usuario'} eliminó ${product.sku} (${product.name})`,
         currentUser
       );
     } catch (error) {
       console.error('Error eliminando producto:', error);
+      alert('Error al eliminar producto: ' + error.message);
     }
   };
 
   const handleQuantityChange = async (product, delta) => {
-    const newQty = (product.quantity || 0) + delta;
+    if (!canEdit) {
+      alert('Solo Franco y M.silva tienen permisos para ajustar el stock.');
+      return;
+    }
+    if (updatingProductIds.has(product.id)) return;
+    setUpdatingProductIds((prev) => new Set(prev).add(product.id));
+
+    const currentQty = Number(product.quantity) || 0;
+    const newQty = Math.round((currentQty + delta) * 100) / 100;
+
     try {
       await updateDoc(doc(db, 'products', product.id), {
         quantity: newQty,
         lastUpdated: serverTimestamp(),
-        updatedBy: currentUser.uid,
+        updatedBy: currentUser?.uid || 'anon',
       });
 
       const action = delta > 0 ? 'cantidad_agregada' : 'cantidad_descontada';
       await logAction(action, currentUser, {
         sku: product.sku,
         productName: product.name,
-        previousValue: product.quantity,
+        category: product.category,
+        previousValue: currentQty,
         newValue: newQty,
+        description: `${delta > 0 ? 'Sumó' : 'Descontó'} ${Math.abs(delta)} ud(s) a ${product.sku} (${product.name})`,
       });
 
       const msg = delta > 0
-        ? `${currentUser.displayName || currentUser.email} agregó ${delta} uds a ${product.sku} (${product.name})`
-        : `${currentUser.displayName || currentUser.email} descontó ${Math.abs(delta)} uds de ${product.sku} (${product.name})`;
+        ? `${currentUser?.displayName || currentUser?.email || 'Usuario'} agregó ${delta} uds a ${product.sku} (${product.name})`
+        : `${currentUser?.displayName || currentUser?.email || 'Usuario'} descontó ${Math.abs(delta)} uds de ${product.sku} (${product.name})`;
       await sendNotification(delta > 0 ? 'agregado' : 'descuento', msg, currentUser);
     } catch (error) {
       console.error('Error actualizando cantidad:', error);
+      alert('Error al modificar cantidad: ' + error.message);
+    } finally {
+      setUpdatingProductIds((prev) => {
+        const next = new Set(prev);
+        next.delete(product.id);
+        return next;
+      });
+    }
+  };
+
+  // Funciones para Modal Descontar por Nota de Pedido
+  const handleAddProductToNp = (p) => {
+    if (npItems.some((it) => it.id === p.id)) return;
+    setNpItems((prev) => [
+      ...prev,
+      {
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        currentStock: Number(p.quantity) || 0,
+        quantityToDiscount: 1,
+      },
+    ]);
+    setNpSearch('');
+  };
+
+  const handleUpdateNpItemQty = (index, val) => {
+    setNpItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], quantityToDiscount: val };
+      return next;
+    });
+  };
+
+  const handleRemoveNpItem = (index) => {
+    setNpItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleParsePasteNp = () => {
+    if (!npPasteText.trim()) return;
+    const lines = npPasteText.split(/\r?\n/);
+    const added = [];
+    const notFoundSkus = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const match = trimmed.match(/^([A-Za-z0-9._-]+)[\s,;\t]+([0-9]+(?:[.,][0-9]+)?)/);
+      if (match) {
+        const skuCode = match[1].trim();
+        const qty = parseFloat(match[2].replace(',', '.'));
+        const matchedProd = products.find(
+          (p) => String(p.sku || '').trim().toLowerCase() === skuCode.toLowerCase()
+        );
+        if (matchedProd) {
+          if (!added.some((it) => it.id === matchedProd.id) && !npItems.some((it) => it.id === matchedProd.id)) {
+            added.push({
+              id: matchedProd.id,
+              sku: matchedProd.sku,
+              name: matchedProd.name,
+              currentStock: Number(matchedProd.quantity) || 0,
+              quantityToDiscount: qty || 1,
+            });
+          }
+        } else {
+          notFoundSkus.push(skuCode);
+        }
+      }
+    }
+
+    if (added.length > 0) {
+      setNpItems((prev) => [...prev, ...added]);
+      setNpPasteText('');
+      setNpInputMode('list');
+      if (notFoundSkus.length > 0) {
+        setNpError(`Se agregaron ${added.length} productos, pero no se encontraron estos SKUs: ${notFoundSkus.join(', ')}`);
+      } else {
+        setNpError('');
+      }
+    } else {
+      setNpError('No se reconocieron SKUs válidos en el texto pegado.');
+    }
+  };
+
+  const handleApplyNotaPedido = async (e) => {
+    if (e) e.preventDefault();
+    if (!canEdit) {
+      alert('Solo Franco y M.silva tienen permisos para descontar stock.');
+      return;
+    }
+    const cleanNp = npNumber.trim();
+    if (!cleanNp) {
+      setNpError('Por favor ingresa el número o código de la Nota de Pedido.');
+      return;
+    }
+    if (npItems.length === 0) {
+      setNpError('Agrega al menos un producto a la lista para descontar.');
+      return;
+    }
+    for (const item of npItems) {
+      const q = Number(item.quantityToDiscount);
+      if (isNaN(q) || q <= 0) {
+        setNpError(`La cantidad a descontar para ${item.sku} debe ser mayor a 0.`);
+        return;
+      }
+    }
+
+    setNpSubmitting(true);
+    setNpError('');
+    setNpSuccess('');
+
+    try {
+      let totalUnits = 0;
+      for (const item of npItems) {
+        const qtyToDiscount = Number(item.quantityToDiscount);
+        totalUnits += qtyToDiscount;
+        const prevQty = Number(item.currentStock) || 0;
+        const newQty = Math.round((prevQty - qtyToDiscount) * 100) / 100;
+
+        await updateDoc(doc(db, 'products', item.id), {
+          quantity: newQty,
+          lastUpdated: serverTimestamp(),
+          updatedBy: currentUser?.uid || 'anon',
+        });
+
+        await logAction('descuento_nota_pedido', currentUser, {
+          sku: item.sku,
+          productName: item.name,
+          previousValue: prevQty,
+          newValue: newQty,
+          notaPedido: cleanNp,
+          cliente: npCliente.trim(),
+          description: `Descuento por Nota de Pedido #${cleanNp}: ${qtyToDiscount} uds de ${item.sku} (${item.name})`,
+        });
+      }
+
+      await sendNotification(
+        'descuento',
+        `${currentUser?.displayName || currentUser?.email || 'Usuario'} descontó ${totalUnits} uds (${npItems.length} productos) por Nota de Pedido #${cleanNp}`,
+        currentUser
+      );
+
+      setNpSuccess(`¡Éxito! Se descontaron ${totalUnits} unidades de ${npItems.length} productos por la Nota de Pedido #${cleanNp}.`);
+      setNpItems([]);
+      setNpNumber('');
+      setNpCliente('');
+      setNpPasteText('');
+      setTimeout(() => {
+        setShowNotaPedidoModal(false);
+        setNpSuccess('');
+      }, 1800);
+    } catch (err) {
+      console.error('Error aplicando nota de pedido:', err);
+      setNpError('Error al descontar stock: ' + err.message);
+    } finally {
+      setNpSubmitting(false);
     }
   };
 
@@ -493,6 +806,10 @@ export default function InventarioPage() {
   };
 
   const handleExecuteImport = async () => {
+    if (!canEdit) {
+      setImportError('Solo los administradores autorizados (Franco y M.silva) pueden importar archivos Excel.');
+      return;
+    }
     if (!importCols?.sku || !importCols?.quantity) {
       setImportError('Debes seleccionar al menos las columnas de SKU y Cantidad.');
       return;
@@ -753,15 +1070,42 @@ export default function InventarioPage() {
 
         {/* Action Buttons */}
         <div className="col-12 col-xl d-flex justify-content-xl-end gap-2 flex-wrap">
+          {/* Botón Descontar por Nota de Pedido */}
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-warning text-warning flex-fill flex-xl-grow-0 d-flex align-items-center justify-content-center gap-1 fw-bold"
+            onClick={() => {
+              if (!canEdit) {
+                alert('Solo Franco y M.silva tienen permisos para descontar stock por Nota de Pedido.');
+                return;
+              }
+              setShowNotaPedidoModal(true);
+            }}
+            style={{ minHeight: '42px', borderColor: '#f59e0b' }}
+            title={!canEdit ? 'Solo Franco y M.silva pueden descontar stock' : 'Descontar stock asociado a una Nota de Pedido'}
+          >
+            <i className="bi bi-receipt"></i>
+            <span>X Nota de Pedido</span>
+          </button>
+
           <button
             type="button"
             className="btn btn-sm btn-outline-secondary text-light flex-fill flex-xl-grow-0 d-flex align-items-center justify-content-center gap-1"
-            onClick={() => setShowImportModal(true)}
+            onClick={() => {
+              if (!canEdit) {
+                alert('Solo Franco y M.silva tienen permisos para importar archivos Excel.');
+                return;
+              }
+              setShowImportModal(true);
+            }}
+            disabled={!canEdit}
             style={{ minHeight: '42px' }}
+            title={!canEdit ? 'Solo Franco y M.silva pueden importar Excel' : 'Importar Excel'}
           >
             <i className="bi bi-file-earmark-arrow-up"></i>
             <span>Importar Excel</span>
           </button>
+
           <button
             type="button"
             className="btn btn-sm btn-outline-secondary text-light flex-fill flex-xl-grow-0 d-flex align-items-center justify-content-center gap-1"
@@ -771,15 +1115,85 @@ export default function InventarioPage() {
             <i className="bi bi-file-earmark-excel"></i>
             <span>Exportar Excel</span>
           </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-primary flex-fill flex-xl-grow-0 order-first order-xl-last d-flex align-items-center justify-content-center gap-1 fw-bold"
-            onClick={openAddModal}
-            style={{ minHeight: '42px' }}
-          >
-            <i className="bi bi-plus-lg"></i>
-            <span>Agregar Producto</span>
-          </button>
+
+          {canEdit && (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary flex-fill flex-xl-grow-0 order-first order-xl-last d-flex align-items-center justify-content-center gap-1 fw-bold"
+              onClick={openAddModal}
+              style={{ minHeight: '42px' }}
+            >
+              <i className="bi bi-plus-lg"></i>
+              <span>Agregar Producto</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Barra de Filtro por Tipo */}
+      <div className="card mb-3 p-2 border-secondary" style={{ background: 'rgba(255, 255, 255, 0.03)' }}>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
+          <div className="d-flex align-items-center gap-2 flex-grow-1" style={{ minWidth: '240px' }}>
+            <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+              <i className="bi bi-funnel-fill text-info"></i> Filtro por Tipo:
+            </span>
+            <select
+              className="form-select form-select-sm bg-dark border-secondary text-light fw-semibold"
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              style={{ minHeight: '38px', fontSize: '13px' }}
+            >
+              <option value="all">📦 Todos los Tipos ({typeCounts.all})</option>
+              <option value="planchas">🔹 Planchas (Onduladas, Greca, Alveolar, Compacto) ({typeCounts.planchas})</option>
+              <option value="perfiles">🔸 Perfiles (H, A, AF, Clip Plano) ({typeCounts.perfiles})</option>
+              <option value="accesorios">🔧 Accesorios y Canaletas ({typeCounts.accesorios})</option>
+              <option value="rollos">🌀 Rollos ({typeCounts.rollos})</option>
+              <option value="pinturas">🎨 Pinturas y Adhesivos</option>
+              <option value="bajo_stock">⚠️ Stock Bajo ({typeCounts.bajo_stock})</option>
+              <option value="faltantes">🚫 Faltantes / Negativos ({typeCounts.faltantes})</option>
+              <option value="sin_stock">0️⃣ Sin Stock ({typeCounts.sin_stock})</option>
+              <option value="ignorados">⚪ Ignorados de Stock (8.70, Clear 0.81x1, Pinturas) ({typeCounts.ignorados})</option>
+              <option disabled>────────── Por Categoría Específica ──────────</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c} ({categoryCounts[c] || 0})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Filter Buttons en Tablet & Móvil */}
+          <div className="d-flex align-items-center gap-1 flex-wrap">
+            {[
+              { id: 'all', label: 'Todos', icon: 'bi-grid' },
+              { id: 'planchas', label: 'Planchas', icon: 'bi-layers' },
+              { id: 'perfiles', label: 'Perfiles', icon: 'bi-rulers' },
+              { id: 'accesorios', label: 'Accesorios', icon: 'bi-wrench' },
+              { id: 'bajo_stock', label: `Bajo (${typeCounts.bajo_stock})`, icon: 'bi-exclamation-triangle', isWarning: true },
+              { id: 'ignorados', label: `Ignorados (${typeCounts.ignorados})`, icon: 'bi-eye-slash' },
+            ].map((btn) => (
+              <button
+                key={btn.id}
+                type="button"
+                className={`btn btn-sm ${selectedType === btn.id ? (btn.isWarning ? 'btn-warning text-dark fw-bold' : 'btn-info text-dark fw-bold') : 'btn-outline-secondary text-light'}`}
+                onClick={() => setSelectedType(btn.id)}
+                style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
+              >
+                <i className={`bi ${btn.icon} me-1`}></i>
+                {btn.label}
+              </button>
+            ))}
+            {selectedType !== 'all' && (
+              <button
+                type="button"
+                className="btn btn-sm btn-link text-secondary text-decoration-none"
+                onClick={() => setSelectedType('all')}
+                style={{ fontSize: '11px', padding: '4px 6px' }}
+              >
+                ✕ Limpiar
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -902,75 +1316,105 @@ export default function InventarioPage() {
                             </td>
                             <td>{product.name}</td>
                             <td>
-                              <span style={{
-                                fontWeight: 700,
-                                fontSize: 'var(--font-size-md)',
-                                color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : isLowStock(product) ? 'var(--warning)' : 'var(--text-primary)',
-                              }}>
-                                {product.quantity}
-                                {product.quantity < 0 ? (
+                              {(() => {
+                                const qty = Number(product.quantity) || 0;
+                                const isIgnored = isProductIgnoredFromStock(product);
+                                const isLow = !isIgnored && isLowStock(product);
+                                const threshold = isIgnored ? null : getLowStockThreshold(product.category, product);
+                                return (
                                   <span style={{
-                                    display: 'inline-block',
-                                    marginLeft: '8px',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    background: 'var(--danger-bg)',
-                                    color: 'var(--danger)',
-                                    fontSize: '11px',
-                                    fontWeight: 600,
+                                    fontWeight: 700,
+                                    fontSize: 'var(--font-size-md)',
+                                    color: qty < 0 ? 'var(--danger)' : qty === 0 ? (isIgnored ? 'var(--text-secondary)' : 'var(--warning)') : isLow ? 'var(--warning)' : 'var(--text-primary)',
                                   }}>
-                                    Faltante
+                                    {product.quantity}
+                                    {qty < 0 ? (
+                                      <span style={{
+                                        display: 'inline-block',
+                                        marginLeft: '8px',
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        background: 'var(--danger-bg)',
+                                        color: 'var(--danger)',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                      }}>
+                                        Faltante
+                                      </span>
+                                    ) : isLow ? (
+                                      <span style={{
+                                        display: 'inline-block',
+                                        marginLeft: '8px',
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        background: 'var(--warning-bg)',
+                                        color: 'var(--warning)',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                      }}>
+                                        Bajo (&lt;{threshold})
+                                      </span>
+                                    ) : isIgnored ? (
+                                      <span style={{
+                                        display: 'inline-block',
+                                        marginLeft: '8px',
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        background: 'rgba(255,255,255,0.06)',
+                                        color: 'var(--text-secondary)',
+                                        fontSize: '11px',
+                                        fontWeight: 500,
+                                      }} title="Ignorado de alertas de stock">
+                                        Sin alerta
+                                      </span>
+                                    ) : null}
                                   </span>
-                                ) : isLowStock(product) ? (
-                                  <span style={{
-                                    display: 'inline-block',
-                                    marginLeft: '8px',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    background: 'var(--warning-bg)',
-                                    color: 'var(--warning)',
-                                    fontSize: '11px',
-                                    fontWeight: 600,
-                                  }}>
-                                    Bajo (&lt;{getLowStockThreshold(product.category)})
-                                  </span>
-                                ) : null}
-                              </span>
+                                );
+                              })()}
                             </td>
                             <td>
                               <div className="quantity-control">
                                 <button
                                   className="quantity-btn minus"
                                   onClick={() => handleQuantityChange(product, -1)}
+                                  disabled={!canEdit || updatingProductIds.has(product.id)}
+                                  title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Restar 1'}
                                 >
                                   −
                                 </button>
-                                <div className="quantity-display">
+                                <div className="quantity-display font-monospace">
                                   {product.quantity}
                                 </div>
                                 <button
                                   className="quantity-btn plus"
                                   onClick={() => handleQuantityChange(product, 1)}
+                                  disabled={!canEdit || updatingProductIds.has(product.id)}
+                                  title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Sumar 1'}
                                 >
                                   +
                                 </button>
                               </div>
                             </td>
                             <td>
-                              <div style={{ display: 'flex', gap: '8px' }}>
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => openEditModal(product)}
-                                >
-                                  ✏️ Editar
-                                </button>
-                                <button
-                                  className="btn btn-danger btn-sm"
-                                  onClick={() => handleDelete(product)}
-                                >
-                                  🗑️
-                                </button>
-                              </div>
+                              {canEdit ? (
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => openEditModal(product)}
+                                  >
+                                    ✏️ Editar
+                                  </button>
+                                  <button
+                                    className="btn btn-danger btn-sm"
+                                    onClick={() => handleDelete(product)}
+                                    title="Eliminar producto"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="badge bg-secondary opacity-75 small">Solo lectura</span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -1040,75 +1484,105 @@ export default function InventarioPage() {
                         </span>
                       </td>
                       <td>
-                        <span style={{
-                          fontWeight: 700,
-                          fontSize: 'var(--font-size-md)',
-                          color: product.quantity < 0 ? 'var(--danger)' : product.quantity === 0 ? 'var(--warning)' : isLowStock(product) ? 'var(--warning)' : 'var(--text-primary)',
-                        }}>
-                          {product.quantity}
-                          {product.quantity < 0 ? (
+                        {(() => {
+                          const qty = Number(product.quantity) || 0;
+                          const isIgnored = isProductIgnoredFromStock(product);
+                          const isLow = !isIgnored && isLowStock(product);
+                          const threshold = isIgnored ? null : getLowStockThreshold(product.category, product);
+                          return (
                             <span style={{
-                              display: 'inline-block',
-                              marginLeft: '8px',
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              background: 'var(--danger-bg)',
-                              color: 'var(--danger)',
-                              fontSize: '11px',
-                              fontWeight: 600,
+                              fontWeight: 700,
+                              fontSize: 'var(--font-size-md)',
+                              color: qty < 0 ? 'var(--danger)' : qty === 0 ? (isIgnored ? 'var(--text-secondary)' : 'var(--warning)') : isLow ? 'var(--warning)' : 'var(--text-primary)',
                             }}>
-                              Faltante
+                              {product.quantity}
+                              {qty < 0 ? (
+                                <span style={{
+                                  display: 'inline-block',
+                                  marginLeft: '8px',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  background: 'var(--danger-bg)',
+                                  color: 'var(--danger)',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                }}>
+                                  Faltante
+                                </span>
+                              ) : isLow ? (
+                                <span style={{
+                                  display: 'inline-block',
+                                  marginLeft: '8px',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  background: 'var(--warning-bg)',
+                                  color: 'var(--warning)',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                }}>
+                                  Bajo (&lt;{threshold})
+                                </span>
+                              ) : isIgnored ? (
+                                <span style={{
+                                  display: 'inline-block',
+                                  marginLeft: '8px',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(255,255,255,0.06)',
+                                  color: 'var(--text-secondary)',
+                                  fontSize: '11px',
+                                  fontWeight: 500,
+                                }} title="Ignorado de alertas de stock">
+                                  Sin alerta
+                                </span>
+                              ) : null}
                             </span>
-                          ) : isLowStock(product) ? (
-                            <span style={{
-                              display: 'inline-block',
-                              marginLeft: '8px',
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              background: 'var(--warning-bg)',
-                              color: 'var(--warning)',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                            }}>
-                              Bajo (&lt;{getLowStockThreshold(product.category)})
-                            </span>
-                          ) : null}
-                        </span>
+                          );
+                        })()}
                       </td>
                       <td>
                         <div className="quantity-control">
                           <button
                             className="quantity-btn minus"
                             onClick={() => handleQuantityChange(product, -1)}
+                            disabled={!canEdit || updatingProductIds.has(product.id)}
+                            title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Restar 1'}
                           >
                             −
                           </button>
-                          <div className="quantity-display">
+                          <div className="quantity-display font-monospace">
                             {product.quantity}
                           </div>
                           <button
                             className="quantity-btn plus"
                             onClick={() => handleQuantityChange(product, 1)}
+                            disabled={!canEdit || updatingProductIds.has(product.id)}
+                            title={!canEdit ? 'Solo Franco y M.silva pueden editar' : 'Sumar 1'}
                           >
                             +
                           </button>
                         </div>
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => openEditModal(product)}
-                          >
-                            ✏️ Editar
-                          </button>
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDelete(product)}
-                          >
-                            🗑️
-                          </button>
-                        </div>
+                        {canEdit ? (
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => openEditModal(product)}
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDelete(product)}
+                              title="Eliminar producto"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="badge bg-secondary opacity-75 small">Solo lectura</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1361,6 +1835,24 @@ export default function InventarioPage() {
                         )}
                       </div>
                     )}
+
+                    {/* Campo Opcional: N° Nota de Pedido cuando se edita o descuenta */}
+                    <div className="mt-3 p-2 rounded" style={{ background: 'rgba(255, 193, 7, 0.08)', border: '1px solid rgba(255, 193, 7, 0.25)' }}>
+                      <label className="form-label text-warning small fw-bold mb-1 d-flex align-items-center gap-1" style={{ fontSize: '12px' }}>
+                        <i className="bi bi-receipt"></i> N° Nota de Pedido / Documento (Opcional):
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control form-control-sm bg-dark border-secondary text-light"
+                        placeholder="Ej: NP-10452 o Factura 451"
+                        value={modalNotaPedido}
+                        onChange={(e) => setModalNotaPedido(e.target.value)}
+                        style={{ minHeight: '36px' }}
+                      />
+                      <div className="text-secondary small mt-1" style={{ fontSize: '11px' }}>
+                        Si ingresas un N° de Nota de Pedido, quedará registrado formalmente en el historial de movimientos de auditoría.
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="form-group mb-3">
@@ -1784,6 +2276,428 @@ export default function InventarioPage() {
                   {importing ? 'Importando...' : `Confirmar e Importar (${importRawData.length} productos)`}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Descontar por Nota de Pedido */}
+      {showNotaPedidoModal && (
+        <div className="modal-overlay" onClick={() => !npSubmitting && setShowNotaPedidoModal(false)}>
+          <div
+            className="modal modal-lg"
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: 'flex', flexDirection: 'column', maxWidth: '850px', width: '100%' }}
+          >
+            <div className="modal-header">
+              <div>
+                <h2 className="modal-title d-flex align-items-center gap-2">
+                  <i className="bi bi-receipt-cutoff text-info"></i>
+                  <span>Descontar por Nota de Pedido</span>
+                </h2>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px', marginBottom: 0 }}>
+                  Descuenta materiales del inventario asociándolos formalmente a una Nota de Pedido para control y auditoría.
+                </p>
+              </div>
+              <button
+                className="modal-close"
+                onClick={() => !npSubmitting && setShowNotaPedidoModal(false)}
+                disabled={npSubmitting}
+                aria-label="Cerrar modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ maxHeight: 'calc(85vh - 140px)', overflowY: 'auto' }}>
+              {npError && (
+                <div
+                  className="alert alert-danger d-flex align-items-center gap-2 mb-3"
+                  style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger)', color: 'var(--danger)', fontSize: '13px' }}
+                >
+                  <i className="bi bi-exclamation-triangle-fill"></i>
+                  <div>{npError}</div>
+                </div>
+              )}
+
+              {npSuccess && (
+                <div
+                  className="alert alert-success d-flex align-items-center gap-2 mb-3"
+                  style={{ background: 'var(--success-bg)', border: '1px solid var(--success)', color: 'var(--success)', fontSize: '13px' }}
+                >
+                  <i className="bi bi-check-circle-fill"></i>
+                  <div>{npSuccess}</div>
+                </div>
+              )}
+
+              {/* Datos de la Nota de Pedido */}
+              <div className="card mb-3 p-3 border-secondary" style={{ background: 'rgba(255, 255, 255, 0.03)' }}>
+                <div className="row g-3">
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small fw-bold text-light mb-1">
+                      N° Nota de Pedido / Documento <span className="text-danger">*</span>
+                    </label>
+                    <div className="input-group">
+                      <span className="input-group-text bg-dark border-secondary text-info fw-bold">#</span>
+                      <input
+                        type="text"
+                        className="form-control bg-dark border-secondary text-light fw-bold"
+                        placeholder="Ej: NP-10452 o 10452"
+                        value={npNumber}
+                        onChange={(e) => setNpNumber(e.target.value)}
+                        autoFocus
+                        style={{ minHeight: '40px' }}
+                      />
+                    </div>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label small fw-bold text-light mb-1">
+                      Cliente / Obra / Destino <small className="text-secondary">(Opcional)</small>
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control bg-dark border-secondary text-light"
+                      placeholder="Ej: Constructora San Juan o Sucursal Norte"
+                      value={npCliente}
+                      onChange={(e) => setNpCliente(e.target.value)}
+                      style={{ minHeight: '40px' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Selector de Método de Carga */}
+              <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+                <div className="btn-group btn-group-sm" role="group">
+                  <button
+                    type="button"
+                    className={`btn ${npInputMode === 'list' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                    onClick={() => setNpInputMode('list')}
+                    style={{ minHeight: '34px' }}
+                  >
+                    <i className="bi bi-search me-1"></i> Buscar en Catálogo
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${npInputMode === 'paste' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                    onClick={() => setNpInputMode('paste')}
+                    style={{ minHeight: '34px' }}
+                  >
+                    <i className="bi bi-clipboard-plus me-1"></i> Pegar Lista de SKUs
+                  </button>
+                </div>
+
+                <span className="badge bg-secondary" style={{ fontSize: '12px' }}>
+                  {npItems.length} {npItems.length === 1 ? 'producto en la lista' : 'productos en la lista'}
+                </span>
+              </div>
+
+              {/* Método 1: Buscador de Productos */}
+              {npInputMode === 'list' && (
+                <div className="mb-3">
+                  <div className="position-relative">
+                    <div className="input-group">
+                      <span className="input-group-text bg-dark border-secondary text-secondary">
+                        <i className="bi bi-search"></i>
+                      </span>
+                      <input
+                        type="text"
+                        className="form-control bg-dark border-secondary text-light"
+                        placeholder="Escribe el SKU o nombre del producto para agregarlo..."
+                        value={npSearch}
+                        onChange={(e) => setNpSearch(e.target.value)}
+                        style={{ minHeight: '42px' }}
+                      />
+                      {npSearch && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary text-light"
+                          onClick={() => setNpSearch('')}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Resultados de búsqueda flotantes */}
+                    {npSearch.trim() && (
+                      <div
+                        className="position-absolute w-100 mt-1 shadow-lg rounded border border-secondary"
+                        style={{
+                          background: '#1a1f2e',
+                          zIndex: 1050,
+                          maxHeight: '260px',
+                          overflowY: 'auto',
+                        }}
+                      >
+                        {(() => {
+                          const matches = products.filter((p) => {
+                            const term = npSearch.toLowerCase();
+                            return (
+                              (p.sku || '').toLowerCase().includes(term) ||
+                              (p.name || '').toLowerCase().includes(term) ||
+                              (p.category || '').toLowerCase().includes(term)
+                            );
+                          }).slice(0, 10);
+
+                          if (matches.length === 0) {
+                            return (
+                              <div className="p-3 text-secondary text-center small">
+                                No se encontraron productos coincidentes con &quot;{npSearch}&quot;
+                              </div>
+                            );
+                          }
+
+                          return matches.map((p) => {
+                            const alreadyAdded = npItems.some((it) => it.id === p.id);
+                            const style = getCategoryStyle(p.category);
+                            return (
+                              <div
+                                key={p.id}
+                                className="p-2 border-bottom border-secondary d-flex align-items-center justify-content-between gap-2 hover-bg"
+                                style={{ background: alreadyAdded ? 'rgba(0, 212, 255, 0.05)' : 'transparent' }}
+                              >
+                                <div className="text-truncate" style={{ flex: 1 }}>
+                                  <div className="d-flex align-items-center gap-2 mb-1">
+                                    <code className="text-info fw-bold" style={{ fontSize: '13px' }}>{p.sku}</code>
+                                    <span
+                                      className="badge"
+                                      style={{ background: style.bg, color: style.color, fontSize: '10px' }}
+                                    >
+                                      {p.category || 'SIN CATEGORÍA'}
+                                    </span>
+                                  </div>
+                                  <div className="small text-light text-truncate">{p.name}</div>
+                                  <div className="text-secondary" style={{ fontSize: '11px' }}>
+                                    Stock disponible actual: <strong className="text-light">{p.quantity ?? 0} uds</strong>
+                                  </div>
+                                </div>
+                                <div>
+                                  {alreadyAdded ? (
+                                    <span className="badge bg-secondary text-light px-2 py-1" style={{ fontSize: '11px' }}>
+                                      ✓ En lista
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-info text-dark fw-bold px-3"
+                                      onClick={() => handleAddProductToNp(p)}
+                                      style={{ minHeight: '32px', fontSize: '12px' }}
+                                    >
+                                      <i className="bi bi-plus me-1"></i> Agregar
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Método 2: Pegar texto con SKUs y Cantidades */}
+              {npInputMode === 'paste' && (
+                <div className="card mb-3 p-3 border-secondary" style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
+                  <label className="form-label small fw-bold text-light mb-1">
+                    Pega aquí líneas copiadas (Formato: SKU y Cantidad separados por espacio o tabulador):
+                  </label>
+                  <textarea
+                    className="form-control bg-dark border-secondary text-light font-monospace mb-2"
+                    rows={4}
+                    placeholder={`Ejemplo:\nSKU-001 5\nSKU-002 12\nSKU-003 3`}
+                    value={npPasteText}
+                    onChange={(e) => setNpPasteText(e.target.value)}
+                    style={{ fontSize: '13px' }}
+                  ></textarea>
+                  <div className="d-flex justify-content-between align-items-center">
+                    <small className="text-secondary" style={{ fontSize: '11px' }}>
+                      Reconoce automáticamente los códigos SKU existentes en tu inventario.
+                    </small>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-info text-dark fw-bold"
+                      onClick={handleParsePasteNp}
+                      disabled={!npPasteText.trim()}
+                      style={{ minHeight: '34px' }}
+                    >
+                      <i className="bi bi-box-arrow-in-down me-1"></i> Cargar a la Lista
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Lista / Tabla de Productos a Descontar */}
+              <div className="card border-secondary" style={{ background: 'rgba(0, 0, 0, 0.2)' }}>
+                <div className="card-header bg-dark border-secondary d-flex justify-content-between align-items-center py-2">
+                  <span className="small fw-bold text-light text-uppercase">
+                    <i className="bi bi-list-check text-info me-1"></i> Productos Seleccionados ({npItems.length})
+                  </span>
+                  {npItems.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-link btn-sm text-danger text-decoration-none p-0"
+                      onClick={() => setNpItems([])}
+                      style={{ fontSize: '12px' }}
+                    >
+                      <i className="bi bi-trash me-1"></i> Vaciar lista
+                    </button>
+                  )}
+                </div>
+
+                <div className="card-body p-0">
+                  {npItems.length === 0 ? (
+                    <div className="p-4 text-center text-secondary">
+                      <i className="bi bi-cart-x fs-1 d-block mb-2 opacity-50"></i>
+                      <p className="mb-1 fw-semibold">No has agregado productos a esta Nota de Pedido</p>
+                      <small className="d-block">Usa el buscador o pega la lista de SKUs arriba para agregarlos.</small>
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="table table-dark table-hover align-middle mb-0" style={{ fontSize: '13px', minWidth: '600px' }}>
+                        <thead>
+                          <tr className="border-secondary text-secondary" style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+                            <th style={{ width: '15%' }}>SKU</th>
+                            <th style={{ width: '35%' }}>Producto</th>
+                            <th className="text-center" style={{ width: '15%' }}>Stock Actual</th>
+                            <th className="text-center" style={{ width: '20%' }}>A Descontar</th>
+                            <th className="text-center" style={{ width: '15%' }}>Quedará</th>
+                            <th style={{ width: '5%' }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {npItems.map((item, idx) => {
+                            const curStock = Number(item.currentStock) || 0;
+                            const discountVal = Number(item.quantityToDiscount) || 0;
+                            const finalStock = Math.round((curStock - discountVal) * 100) / 100;
+                            const isDeficit = finalStock < 0;
+
+                            return (
+                              <tr key={item.id} className="border-secondary">
+                                <td>
+                                  <code className="text-info fw-bold">{item.sku}</code>
+                                </td>
+                                <td>
+                                  <div className="fw-semibold text-light text-truncate" style={{ maxWidth: '240px' }} title={item.name}>
+                                    {item.name}
+                                  </div>
+                                </td>
+                                <td className="text-center">
+                                  <span className="badge bg-secondary text-light px-2 py-1">
+                                    {curStock} uds
+                                  </span>
+                                </td>
+                                <td className="text-center">
+                                  <div className="d-flex align-items-center justify-content-center gap-1">
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-secondary text-light"
+                                      onClick={() => {
+                                        const next = Math.max(1, (Number(item.quantityToDiscount) || 1) - 1);
+                                        handleUpdateNpItemQty(idx, next);
+                                      }}
+                                      style={{ width: '28px', height: '28px', padding: 0 }}
+                                      title="Restar 1"
+                                    >
+                                      −
+                                    </button>
+                                    <input
+                                      type="number"
+                                      className="form-control form-control-sm bg-dark border-secondary text-light text-center fw-bold"
+                                      style={{ width: '65px', minHeight: '30px' }}
+                                      min="0.01"
+                                      step="any"
+                                      value={item.quantityToDiscount}
+                                      onChange={(e) => handleUpdateNpItemQty(idx, e.target.value)}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-info text-info"
+                                      onClick={() => {
+                                        const next = (Number(item.quantityToDiscount) || 0) + 1;
+                                        handleUpdateNpItemQty(idx, next);
+                                      }}
+                                      style={{ width: '28px', height: '28px', padding: 0 }}
+                                      title="Sumar 1"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="text-center">
+                                  <span className={`fw-bold ${isDeficit ? 'text-danger' : 'text-success'}`}>
+                                    {finalStock} uds
+                                  </span>
+                                  {isDeficit && (
+                                    <small className="d-block text-danger" style={{ fontSize: '10px' }}>
+                                      (Déficit)
+                                    </small>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-danger p-1"
+                                    onClick={() => handleRemoveNpItem(idx)}
+                                    title="Quitar producto de la lista"
+                                    style={{ width: '30px', height: '30px' }}
+                                  >
+                                    <i className="bi bi-trash"></i>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {npItems.length > 0 && (
+                  <div className="card-footer bg-dark border-secondary p-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div className="text-secondary small">
+                      Total a Descontar: <strong className="text-info fs-6">{npItems.reduce((acc, it) => acc + (Number(it.quantityToDiscount) || 0), 0)} unidades</strong> en <strong className="text-light">{npItems.length} producto(s)</strong>
+                    </div>
+                    <div className="small text-secondary">
+                      Referencia: <code>#{npNumber.trim() || 'Sin número'}</code>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowNotaPedidoModal(false)}
+                disabled={npSubmitting}
+                style={{ minHeight: '40px' }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary fw-bold d-flex align-items-center gap-2"
+                onClick={handleApplyNotaPedido}
+                disabled={npSubmitting || npItems.length === 0 || !npNumber.trim()}
+                style={{ minHeight: '40px' }}
+              >
+                {npSubmitting ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    <span>Procesando Descuento...</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-check2-circle"></i>
+                    <span>Confirmar Descuento ({npItems.reduce((acc, it) => acc + (Number(it.quantityToDiscount) || 0), 0)} uds)</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

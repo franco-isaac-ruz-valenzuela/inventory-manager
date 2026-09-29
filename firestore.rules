@@ -8,10 +8,20 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Helper: verificar si el usuario tiene rol de editor autorizado
+    // Solo Franco.ruz.valenzuela@gmail.com y M.silva pueden editar productos
+    function canEdit() {
+      return isAuthenticated() && (
+        request.auth.token.email.matches('(?i)franco\\.ruz\\.valenzuela@.*') ||
+        request.auth.token.email.matches('(?i)m\\.?silva.*')
+      );
+    }
+
     // 1. Catálogo e Inventario de Productos
-    // Solo usuarios autenticados pueden consultar, crear, modificar o eliminar productos
+    // Usuarios autenticados pueden consultar; solo editores autorizados pueden crear, modificar o eliminar
     match /products/{productId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if canEdit();
     }
 
     // 2. Historial de Auditoría (Audit Log) - INMUTABLE

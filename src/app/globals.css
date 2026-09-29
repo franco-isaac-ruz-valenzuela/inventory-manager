@@ -2198,9 +2198,9 @@ select.form-input {
 }
 
 /* ============================================
-   RESPONSIVE — TABLET (≤ 768px)
+   RESPONSIVE — TABLET & MOBILE (≤ 1024px)
    ============================================ */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   /* --- Layout --- */
   .sidebar {
     transform: translateX(-100%);

@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 
 function AppContent({ children }) {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading, canEdit } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
 
@@ -75,9 +75,20 @@ function AppContent({ children }) {
         <div className="topbar-actions">
           <NotificationBell />
           {currentUser && (
-            <div className="topbar-user-badge">
-              <span className="topbar-user-dot" />
+            <div className="topbar-user-badge" title={`Rol: ${canEdit ? 'Editor autorizado' : 'Solo lectura'}`}>
+              <span className="topbar-user-dot" style={{ background: canEdit ? '#10b981' : '#f59e0b' }} />
               <span>{currentUser.displayName || currentUser.email?.split('@')[0]}</span>
+              <span style={{
+                fontSize: '10px',
+                marginLeft: '4px',
+                padding: '1px 6px',
+                borderRadius: '4px',
+                background: canEdit ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                color: canEdit ? '#10b981' : '#f59e0b',
+                fontWeight: 600
+              }}>
+                {canEdit ? 'Editor' : 'Lectura'}
+              </span>
             </div>
           )}
         </div>

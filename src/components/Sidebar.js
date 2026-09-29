@@ -17,7 +17,7 @@ const navItems = [
 
 export default function Sidebar({ isOpen, onClose }) {
   const pathname = usePathname();
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, canEdit } = useAuth();
 
   const handleLogout = async () => {
     try {
@@ -83,6 +83,25 @@ export default function Sidebar({ isOpen, onClose }) {
               {currentUser?.displayName || 'Usuario'}
             </div>
             <div className="sidebar-user-email">{currentUser?.email}</div>
+            <div style={{ marginTop: '3px' }}>
+              <span
+                style={{
+                  fontSize: '10px',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  fontWeight: 600,
+                  background: canEdit ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                  color: canEdit ? '#10b981' : '#f59e0b',
+                  border: `1px solid ${canEdit ? '#10b98144' : '#f59e0b44'}`,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <i className={canEdit ? 'bi bi-shield-check' : 'bi bi-eye'}></i>
+                {canEdit ? 'Editor' : 'Solo Lectura'}
+              </span>
+            </div>
           </div>
           <button
             className="sidebar-logout-btn"
