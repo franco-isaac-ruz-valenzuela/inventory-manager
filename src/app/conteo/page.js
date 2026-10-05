@@ -10,6 +10,8 @@ import {
   serverTimestamp,
   addDoc,
   setDoc,
+  updateDoc,
+  FieldPath,
 } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { logAction } from '../../lib/auditLog';
@@ -48,6 +50,7 @@ const DRAFT_STORAGE_KEY = 'leker_physical_audit_v1';
 export default function ConteoFisicoPage() {
   const { currentUser, canEdit } = useAuth();
   const [products, setProducts] = useState([]);
+  const [extraProducts, setExtraProducts] = useState({});
   const [loading, setLoading] = useState(true);
 
   // Tab activo: 'conteo' (registro) | 'analisis' (inconsistencias)
@@ -57,6 +60,23 @@ export default function ConteoFisicoPage() {
   const [countedMap, setCountedMap] = useState({});
   // Mapa de items tocados/confirmados por el usuario
   const [touchedMap, setTouchedMap] = useState({});
+
+  // Refs para acceso sincrónico y seguro contra cierres (closures) obsoletos
+  const countedMapRef = useRef(countedMap);
+  const touchedMapRef = useRef(touchedMap);
+  const extraProductsRef = useRef(extraProducts);
+
+  useEffect(() => {
+    countedMapRef.current = countedMap;
+  }, [countedMap]);
+
+  useEffect(() => {
+    touchedMapRef.current = touchedMap;
+  }, [touchedMap]);
+
+  useEffect(() => {
+    extraProductsRef.current = extraProducts;
+  }, [extraProducts]);
 
   // Sincronización en la nube multi-dispositivo en Firestore
   const [cloudSynced, setCloudSynced] = useState(false);
@@ -81,11 +101,19 @@ export default function ConteoFisicoPage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all'); // all | diff | faltante | sobrante | exacto | contados | pendientes
 
-  // Scanner modal
+  // Modales
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [lastScannedMsg, setLastScannedMsg] = useState(null);
 
-  // Modales
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [newProductForm, setNewProductForm] = useState({
+    sku: '',
+    name: '',
+    category: 'PLANCHAS',
+    color: 'clear',
+    countedQty: 1,
+  });
+
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -95,6 +123,33 @@ export default function ConteoFisicoPage() {
   const currentMonthKey = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
   const [monthAlert, setMonthAlert] = useState(null);
 
+  // 0. Cargar borrador local inmediatamente al montar la página
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.countedMap && typeof parsed.countedMap === 'object') {
+          countedMapRef.current = parsed.countedMap;
+          setCountedMap(parsed.countedMap);
+        }
+        if (parsed.touchedMap && typeof parsed.touchedMap === 'object') {
+          touchedMapRef.current = parsed.touchedMap;
+          setTouchedMap(parsed.touchedMap);
+        }
+        if (parsed.extraProducts && typeof parsed.extraProducts === 'object') {
+          extraProductsRef.current = parsed.extraProducts;
+          setExtraProducts(parsed.extraProducts);
+        }
+        if (parsed.sessionName) {
+          setSessionName(parsed.sessionName);
+        }
+      }
+    } catch (err) {
+      console.warn('Error leyendo borrador local de conteo:', err);
+    }
+  }, []);
+
   // 1. Cargar productos desde Firestore (tiempo real)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'products'), (snapshot) => {
@@ -102,13 +157,18 @@ export default function ConteoFisicoPage() {
       snapshot.forEach((docSnap) => {
         items.push({ id: docSnap.id, ...docSnap.data() });
       });
-      // Orden alfabético por SKU
       items.sort((a, b) => (a.sku || '').localeCompare(b.sku || ''));
       setProducts(items);
+      setLoading(false);
+    }, (err) => {
+      console.error('Error cargando catálogo maestro:', err);
       setLoading(false);
     });
     return () => unsub();
   }, []);
+
+  // Timers para debouncing de sincronización a la nube
+  const syncDebounceTimers = useRef({});
 
   // 2. Suscripción en tiempo real a la sesión de conteo activa en Firestore (Multi-dispositivo)
   useEffect(() => {
@@ -116,7 +176,14 @@ export default function ConteoFisicoPage() {
     const unsub = onSnapshot(auditDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const incomingCounts = data.counts || {};
+        const incomingCounts = (data.counts && typeof data.counts === 'object') ? data.counts : {};
+
+        if (data.extraProducts && typeof data.extraProducts === 'object') {
+          const mergedExtras = { ...extraProductsRef.current, ...data.extraProducts };
+          extraProductsRef.current = mergedExtras;
+          setExtraProducts(mergedExtras);
+        }
+
         const incomingSessionName = data.sessionName;
         const incomingMonth = data.monthKey;
 
@@ -128,8 +195,22 @@ export default function ConteoFisicoPage() {
           });
         }
 
-        setCountedMap(incomingCounts);
-        if (data.updatedByMap) setUpdatedByMap(data.updatedByMap);
+        // Combinar datos entrantes de la nube con ediciones locales.
+        // Si el usuario modificó algún producto en este dispositivo (touchedMapRef), conservamos su valor local
+        // para que un snapshot viejo no le pise lo que acaba de escribir.
+        const mergedCounts = { ...incomingCounts };
+        Object.keys(countedMapRef.current).forEach((pId) => {
+          if (touchedMapRef.current[pId]) {
+            mergedCounts[pId] = countedMapRef.current[pId];
+          }
+        });
+
+        countedMapRef.current = mergedCounts;
+        setCountedMap(mergedCounts);
+
+        if (data.updatedByMap) {
+          setUpdatedByMap((prev) => ({ ...prev, ...data.updatedByMap }));
+        }
         if (incomingSessionName) setSessionName(incomingSessionName);
         if (data.lastUpdated) {
           setCloudLastUpdated(data.lastUpdated.toDate ? data.lastUpdated.toDate() : new Date());
@@ -142,7 +223,8 @@ export default function ConteoFisicoPage() {
           sessionName,
           monthKey: currentMonthKey,
           status: 'in_progress',
-          counts: {},
+          counts: countedMapRef.current || {},
+          extraProducts: extraProductsRef.current || {},
           updatedByMap: {},
           createdAt: serverTimestamp(),
           lastUpdated: serverTimestamp(),
@@ -151,110 +233,277 @@ export default function ConteoFisicoPage() {
         setCloudSynced(true);
       }
     }, (err) => {
-      console.error('Error sincronizando conteo en vivo:', err);
+      console.warn('Conteo físico: Operando con respaldo local (sin conexión a Firestore):', err.message);
       setCloudSynced(false);
     });
 
     return () => unsub();
   }, [currentMonthKey, currentUser]);
 
-  // 3. Respaldo local en localStorage como contingencia
+  // 3. Respaldo en localStorage de contingencia
   useEffect(() => {
-    if (loading || products.length === 0) return;
+    if (loading || (products.length === 0 && Object.keys(extraProducts).length === 0)) return;
     try {
       const payload = {
         sessionName,
         monthKey: currentMonthKey,
         countedMap,
         touchedMap,
+        extraProducts,
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
     } catch (err) {
       console.error('Error guardando borrador local:', err);
     }
-  }, [countedMap, touchedMap, sessionName, loading, products.length, currentMonthKey]);
+  }, [countedMap, touchedMap, sessionName, extraProducts, loading, products.length, currentMonthKey]);
 
-  // Función para sincronizar un producto en la nube atómicamente
+  // Sincronizar un conteo a la nube (Firestore usando FieldPath atómico para no romper claves con puntos)
   const syncCountToCloud = useCallback(async (productId, num) => {
     try {
       const auditDocRef = doc(db, 'active_physical_audit', 'current');
       const uName = currentUser?.displayName || currentUser?.email || 'Usuario';
       const timeStr = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+      const cleanNum = Math.max(0, Number(num) || 0);
+      const strId = String(productId);
 
-      // Usar dot-notation en Firestore para modificar únicamente este producto sin sobreescribir otros
-      await setDoc(auditDocRef, {
-        sessionName,
-        monthKey: currentMonthKey,
-        status: 'in_progress',
-        [`counts.${productId}`]: num,
-        [`updatedByMap.${productId}`]: {
-          userName: uName,
-          time: timeStr,
-        },
-        lastUpdated: serverTimestamp(),
-        lastUpdatedBy: uName,
-      }, { merge: true });
+      try {
+        await updateDoc(
+          auditDocRef,
+          new FieldPath('counts', strId),
+          cleanNum,
+          new FieldPath('updatedByMap', strId),
+          { userName: uName, time: timeStr },
+          'lastUpdated',
+          serverTimestamp(),
+          'lastUpdatedBy',
+          uName
+        );
+      } catch (updateErr) {
+        // Si no existe aún el documento o la ruta no existe, inicializar con setDoc y merge
+        await setDoc(auditDocRef, {
+          sessionName,
+          monthKey: currentMonthKey,
+          status: 'in_progress',
+          counts: {
+            [strId]: cleanNum,
+          },
+          updatedByMap: {
+            [strId]: {
+              userName: uName,
+              time: timeStr,
+            },
+          },
+          lastUpdated: serverTimestamp(),
+          lastUpdatedBy: uName,
+        }, { merge: true });
+      }
     } catch (err) {
-      console.error('Error enviando conteo a la nube:', err);
+      console.warn('Error sincronizando con Firestore:', err);
     }
   }, [sessionName, currentMonthKey, currentUser]);
 
-  // Actualizar conteo de un producto específico (UI optimista + Sync Nube)
+  // Actualizar conteo de un producto específico (UI optimista + Limpieza de 0 + Debounce sync)
   const setCountForProduct = useCallback((productId, value) => {
-    const num = Math.max(0, parseInt(value, 10) || 0);
-    setCountedMap((prev) => ({ ...prev, [productId]: num }));
+    // 1. Filtrar solo dígitos
+    const numericOnly = String(value).replace(/[^0-9]/g, '');
+
+    // 2. Si el usuario borró todo con Backspace, permitir que el input quede vacío mientras tipea
+    if (numericOnly === '') {
+      countedMapRef.current[productId] = 0;
+      touchedMapRef.current[productId] = true;
+      setCountedMap((prev) => ({ ...prev, [productId]: '' }));
+      setTouchedMap((prev) => ({ ...prev, [productId]: true }));
+
+      if (syncDebounceTimers.current[productId]) {
+        clearTimeout(syncDebounceTimers.current[productId]);
+      }
+      syncDebounceTimers.current[productId] = setTimeout(() => {
+        syncCountToCloud(productId, 0);
+        delete syncDebounceTimers.current[productId];
+      }, 350);
+      return;
+    }
+
+    // 3. Eliminar ceros a la izquierda (ej: "0294" -> "294")
+    const cleanStr = numericOnly.replace(/^0+(?=\d)/, '');
+    const num = Math.max(0, parseInt(cleanStr, 10) || 0);
+
+    countedMapRef.current[productId] = num;
+    touchedMapRef.current[productId] = true;
+    setCountedMap((prev) => ({ ...prev, [productId]: cleanStr }));
     setTouchedMap((prev) => ({ ...prev, [productId]: true }));
-    syncCountToCloud(productId, num);
+
+    // 4. Debounce sync para no saturar con múltiples peticiones por cada tecla
+    if (syncDebounceTimers.current[productId]) {
+      clearTimeout(syncDebounceTimers.current[productId]);
+    }
+    syncDebounceTimers.current[productId] = setTimeout(() => {
+      syncCountToCloud(productId, num);
+      delete syncDebounceTimers.current[productId];
+    }, 350);
   }, [syncCountToCloud]);
 
-  // Incrementar o decrementar conteo (UI optimista + Sync Nube)
+  // Incrementar o decrementar conteo (UI optimista + Sync Nube sincrónica)
   const adjustCount = useCallback((productId, delta) => {
-    let nextNum = 0;
-    setCountedMap((prev) => {
-      const current = Number(prev[productId]) || 0;
-      nextNum = Math.max(0, current + delta);
-      return { ...prev, [productId]: nextNum };
-    });
+    const current = Number(countedMapRef.current[productId]) || 0;
+    const nextNum = Math.max(0, current + delta);
+    countedMapRef.current[productId] = nextNum;
+    touchedMapRef.current[productId] = true;
+    setCountedMap((prev) => ({ ...prev, [productId]: nextNum }));
     setTouchedMap((prev) => ({ ...prev, [productId]: true }));
-    syncCountToCloud(productId, nextNum);
+
+    if (syncDebounceTimers.current[productId]) {
+      clearTimeout(syncDebounceTimers.current[productId]);
+    }
+    syncDebounceTimers.current[productId] = setTimeout(() => {
+      syncCountToCloud(productId, nextNum);
+      delete syncDebounceTimers.current[productId];
+    }, 200);
   }, [syncCountToCloud]);
 
   // Marcar conteo igual al stock del sistema (teórico)
   const setEqualToSystem = useCallback((product) => {
-    const sys = Number(product.quantity) || 0;
-    setCountForProduct(product.id, Math.max(0, sys));
-  }, [setCountForProduct]);
+    const sys = Math.max(0, Number(product.quantity) || 0);
+    countedMapRef.current[product.id] = sys;
+    touchedMapRef.current[product.id] = true;
+    setCountedMap((prev) => ({ ...prev, [product.id]: sys }));
+    setTouchedMap((prev) => ({ ...prev, [product.id]: true }));
+    syncCountToCloud(product.id, sys);
+  }, [syncCountToCloud]);
 
   // Poner en 0
   const setToZero = useCallback((productId) => {
-    setCountForProduct(productId, 0);
-  }, [setCountForProduct]);
+    countedMapRef.current[productId] = 0;
+    touchedMapRef.current[productId] = true;
+    setCountedMap((prev) => ({ ...prev, [productId]: 0 }));
+    setTouchedMap((prev) => ({ ...prev, [productId]: true }));
+    syncCountToCloud(productId, 0);
+  }, [syncCountToCloud]);
+
+  // Combinar catálogo del sistema + productos extras agregados manualmente en bodega
+  const allAuditedProducts = useMemo(() => {
+    const list = [...products];
+    Object.values(extraProducts).forEach((extra) => {
+      if (!list.some((p) => p.id === extra.id || (p.sku && p.sku.toLowerCase() === (extra.sku || '').toLowerCase()))) {
+        list.push(extra);
+      }
+    });
+    return list;
+  }, [products, extraProducts]);
 
   // Manejo de lectura de escáner (cámara o código de barras)
   const handleBarcodeScan = useCallback((code) => {
     if (!code) return;
     const clean = code.trim().toLowerCase();
-    const match = products.find((p) => (p.sku || '').toLowerCase() === clean);
+    const match = allAuditedProducts.find((p) => (p.sku || '').toLowerCase() === clean);
 
     if (match) {
       adjustCount(match.id, 1);
+      const nextVal = (Number(countedMapRef.current[match.id]) || 0) + 1;
       setLastScannedMsg({
         success: true,
-        text: `+1 a ${match.sku} (${match.name}) — Conteo actual: ${(countedMap[match.id] || 0) + 1} uds`,
+        text: `+1 a ${match.sku} (${match.name}) — Conteo actual: ${nextVal} uds`,
       });
     } else {
       setLastScannedMsg({
         success: false,
-        text: `Código "${code}" no encontrado en el catálogo de productos.`,
+        unmatchedCode: code.trim().toUpperCase(),
+        text: `El código "${code}" no está en el catálogo. ¿Deseas agregarlo?`,
       });
     }
-  }, [products, adjustCount, countedMap]);
+  }, [allAuditedProducts, adjustCount]);
+
+  // Agregar producto no listado encontrado en bodega
+  const handleAddExtraProduct = async (e) => {
+    e.preventDefault();
+    if (!newProductForm.sku.trim() || !newProductForm.name.trim()) return;
+
+    const cleanSku = newProductForm.sku.trim().toUpperCase();
+    const cleanName = newProductForm.name.trim();
+    const qty = Math.max(0, parseInt(newProductForm.countedQty, 10) || 1);
+    const extraId = `extra_${Date.now()}`;
+
+    const newExtra = {
+      id: extraId,
+      sku: cleanSku,
+      name: cleanName,
+      category: newProductForm.category,
+      color: ['ALVEOLAR', 'ONDULADAS', 'PACK', 'INDUSTRIAL', 'COMPACTO', 'ROLLO', 'PLANCHAS'].some(k => newProductForm.category.toUpperCase().includes(k))
+        ? newProductForm.color
+        : null,
+      quantity: 0, // En sistema es 0 porque es un producto no registrado previamente
+      isExtra: true,
+    };
+
+    // Actualización local inmediata sincrónica
+    extraProductsRef.current[extraId] = newExtra;
+    countedMapRef.current[extraId] = qty;
+    touchedMapRef.current[extraId] = true;
+
+    setExtraProducts((prev) => ({ ...prev, [extraId]: newExtra }));
+    setCountedMap((prev) => ({ ...prev, [extraId]: qty }));
+    setTouchedMap((prev) => ({ ...prev, [extraId]: true }));
+
+    // Limpiar filtros y colocar el SKU nuevo en búsqueda para que el operario lo vea al instante
+    setSelectedMainType('all');
+    setSelectedCategory('all');
+    setSelectedColor('all');
+    setStatusFilter('all');
+    setSearch(cleanSku);
+
+    setFeedbackMsg(`Producto "${cleanSku}" agregado al conteo con ${qty} uds.`);
+    setTimeout(() => setFeedbackMsg(''), 6000);
+    setShowAddProductModal(false);
+    setNewProductForm({ sku: '', name: '', category: 'PLANCHAS', color: 'clear', countedQty: 1 });
+
+    try {
+      const auditDocRef = doc(db, 'active_physical_audit', 'current');
+      const uName = currentUser?.displayName || currentUser?.email || 'Usuario';
+      const timeStr = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+
+      try {
+        await updateDoc(auditDocRef, {
+          [`counts.${extraId}`]: qty,
+          [`extraProducts.${extraId}`]: newExtra,
+          [`updatedByMap.${extraId}`]: {
+            userName: uName,
+            time: timeStr,
+          },
+          lastUpdated: serverTimestamp(),
+          lastUpdatedBy: uName,
+        });
+      } catch (err) {
+        await setDoc(auditDocRef, {
+          sessionName,
+          monthKey: currentMonthKey,
+          status: 'in_progress',
+          counts: {
+            [extraId]: qty,
+          },
+          extraProducts: {
+            [extraId]: newExtra,
+          },
+          updatedByMap: {
+            [extraId]: {
+              userName: uName,
+              time: timeStr,
+            },
+          },
+          lastUpdated: serverTimestamp(),
+          lastUpdatedBy: uName,
+        }, { merge: true });
+      }
+    } catch (err) {
+      console.warn('Error guardando producto extra en Firestore:', err);
+    }
+  };
 
   // Reiniciar todo a 0 (en local y en la nube para todos los dispositivos)
   const handleResetAll = async () => {
     setCountedMap({});
     setTouchedMap({});
+    setExtraProducts({});
     try {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
       const auditDocRef = doc(db, 'active_physical_audit', 'current');
@@ -264,12 +513,13 @@ export default function ConteoFisicoPage() {
         monthKey: currentMonthKey,
         status: 'in_progress',
         counts: {},
+        extraProducts: {},
         updatedByMap: {},
         lastUpdated: serverTimestamp(),
         lastUpdatedBy: uName,
       });
     } catch (e) {
-      console.error('Error reseteando en la nube:', e);
+      console.warn('Error reseteando en la nube:', e);
     }
     setShowResetModal(false);
     setFeedbackMsg('Todo el conteo físico ha sido reiniciado a 0 en todos los dispositivos.');
@@ -281,7 +531,7 @@ export default function ConteoFisicoPage() {
     if (!window.confirm('¿Copiar todo el stock del sistema al conteo físico? Luego podrás ajustar solo los que tengan diferencias.')) return;
     const newMap = {};
     const newTouch = {};
-    products.forEach((p) => {
+    allAuditedProducts.forEach((p) => {
       newMap[p.id] = Math.max(0, Number(p.quantity) || 0);
       newTouch[p.id] = true;
     });
@@ -298,7 +548,7 @@ export default function ConteoFisicoPage() {
         lastUpdatedBy: uName,
       }, { merge: true });
     } catch (e) {
-      console.error(e);
+      console.warn(e);
     }
     setFeedbackMsg('Se copiaron las cantidades teóricas a la nube para todos los dispositivos.');
     setTimeout(() => setFeedbackMsg(''), 5000);
@@ -312,7 +562,7 @@ export default function ConteoFisicoPage() {
     metrics,
     familySummary,
   } = useMemo(() => {
-    let totalItems = products.length;
+    let totalItems = allAuditedProducts.length;
     let exactMatches = 0;
     let totalDifferences = 0;
     let faltantesCount = 0;
@@ -331,13 +581,13 @@ export default function ConteoFisicoPage() {
       otros: { label: 'Otros', total: 0, diffs: 0, netDiff: 0 },
     };
 
-    const calculatedItems = products.map((p) => {
+    const calculatedItems = allAuditedProducts.map((p) => {
       const systemQty = Number(p.quantity) || 0;
       const countedQty = Number(countedMap[p.id]) || 0;
       const isTouched = !!touchedMap[p.id];
       const diff = countedQty - systemQty; // Físico - Teórico
       const mainType = getProductMainType(p);
-      const color = detectProductColor(p);
+      const color = p.color || detectProductColor(p);
 
       if (countedQty > 0 || isTouched) {
         countedItemsCount++;
@@ -400,14 +650,13 @@ export default function ConteoFisicoPage() {
       },
       familySummary: Object.values(families),
     };
-  }, [products, countedMap, touchedMap]);
+  }, [allAuditedProducts, countedMap, touchedMap]);
 
   // --------------------------------------------------------------------------
   // FILTRADO DINÁMICO DE PRODUCTOS PARA LA VISTA
   // --------------------------------------------------------------------------
   const filteredItems = useMemo(() => {
     return itemsWithDiff.filter((item) => {
-      // 1. Buscador
       if (search.trim()) {
         const q = search.toLowerCase();
         const skuMatch = (item.sku || '').toLowerCase().includes(q);
@@ -416,22 +665,18 @@ export default function ConteoFisicoPage() {
         if (!skuMatch && !nameMatch && !catMatch) return false;
       }
 
-      // 2. Familia Principal
       if (selectedMainType !== 'all') {
         if (item.mainType !== selectedMainType) return false;
       }
 
-      // 3. Tono (solo si planchas está seleccionado o tono específico)
       if (selectedColor !== 'all') {
         if (item.color !== selectedColor) return false;
       }
 
-      // 4. Subcategoría / Modelo
       if (selectedCategory !== 'all') {
         if ((item.category || '').toUpperCase() !== selectedCategory.toUpperCase()) return false;
       }
 
-      // 5. Filtro de Estado de Conteo
       if (statusFilter === 'diff') {
         if (item.diff === 0) return false;
       } else if (statusFilter === 'faltante') {
@@ -599,22 +844,35 @@ export default function ConteoFisicoPage() {
 
     setApplying(true);
     try {
-      // Usar writeBatch para atomicidad
       const batch = writeBatch(db);
 
       itemsToUpdate.forEach((d) => {
-        const docRef = doc(db, 'products', d.id);
-        batch.update(docRef, {
-          quantity: d.countedQty,
-          lastUpdated: serverTimestamp(),
-          updatedBy: currentUser?.uid || 'anon',
-          lastAuditSession: sessionName,
-        });
+        if (d.isExtra) {
+          // Si fue un producto nuevo ingresado en bodega, se crea en la base de datos maestra
+          const newDocRef = doc(collection(db, 'products'));
+          batch.set(newDocRef, {
+            sku: d.sku,
+            name: d.name,
+            category: d.category || 'SIN CATEGORÍA',
+            quantity: d.countedQty,
+            createdAt: serverTimestamp(),
+            lastUpdated: serverTimestamp(),
+            updatedBy: currentUser.uid,
+          });
+        } else {
+          const docRef = doc(db, 'products', d.id);
+          batch.update(docRef, {
+            quantity: d.countedQty,
+            lastUpdated: serverTimestamp(),
+            updatedBy: currentUser?.uid || 'anon',
+            lastAuditSession: sessionName,
+          });
+        }
       });
 
       await batch.commit();
 
-      // Guardar también la sesión en historial
+      // Guardar sesión en historial
       await addDoc(collection(db, 'inventory_sessions'), {
         name: `Conciliación: ${sessionName}`,
         createdAt: serverTimestamp(),
@@ -719,6 +977,19 @@ export default function ConteoFisicoPage() {
           <button
             type="button"
             className="btn btn-outline-info text-info btn-sm d-inline-flex align-items-center gap-2"
+            onClick={() => {
+              setNewProductForm({ sku: '', name: '', category: 'PLANCHAS', color: 'clear', countedQty: 1 });
+              setShowAddProductModal(true);
+            }}
+            title="Agregar un producto no listado encontrado en bodega"
+          >
+            <i className="bi bi-plus-circle-fill"></i>
+            <span>Agregar Producto</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-outline-info text-info btn-sm d-inline-flex align-items-center gap-2"
             onClick={() => setShowScannerModal(true)}
             title="Escanear con cámara o pistola de código de barras"
           >
@@ -792,6 +1063,7 @@ export default function ConteoFisicoPage() {
               onClick={() => {
                 setCountedMap({});
                 setTouchedMap({});
+                setExtraProducts({});
                 setMonthAlert(null);
                 setFeedbackMsg('Iniciado nuevo conteo del mes en 0.');
                 setTimeout(() => setFeedbackMsg(''), 5000);
@@ -804,8 +1076,9 @@ export default function ConteoFisicoPage() {
               type="button"
               className="btn btn-outline-secondary text-light btn-sm"
               onClick={() => {
-                setCountedMap(monthAlert.draftData.countedMap || {});
+                setCountedMap(monthAlert.draftData.counts || monthAlert.draftData.countedMap || {});
                 setTouchedMap(monthAlert.draftData.touchedMap || {});
+                if (monthAlert.draftData.extraProducts) setExtraProducts(monthAlert.draftData.extraProducts);
                 if (monthAlert.draftData.sessionName) setSessionName(monthAlert.draftData.sessionName);
                 setMonthAlert(null);
               }}
@@ -886,7 +1159,7 @@ export default function ConteoFisicoPage() {
             <i className="bi bi-box-seam"></i>
           </div>
           <div className="stat-value">{metrics.total}</div>
-          <div className="stat-label">Catálogo Total</div>
+          <div className="stat-label">Catálogo Evaluado</div>
         </div>
 
         <div className="stat-card">
@@ -1219,6 +1492,11 @@ export default function ConteoFisicoPage() {
                             >
                               {item.sku}
                             </code>
+                            {item.isExtra && (
+                              <span className="badge bg-warning text-dark d-block mt-1 font-monospace" style={{ fontSize: '9px' }}>
+                                NUEVO EN BODEGA
+                              </span>
+                            )}
                           </td>
 
                           {/* Nombre + Badges de Tono */}
@@ -1282,16 +1560,24 @@ export default function ConteoFisicoPage() {
                               </button>
 
                               <input
-                                type="number"
-                                min="0"
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
                                 className="form-control form-control-sm text-center font-monospace fw-bold"
-                                value={countedMap[item.id] ?? 0}
+                                value={countedMap[item.id] === '' ? '' : (countedMap[item.id] ?? 0)}
+                                placeholder="0"
+                                onFocus={(e) => e.target.select()}
                                 onChange={(e) => setCountForProduct(item.id, e.target.value)}
+                                onBlur={(e) => {
+                                  if (e.target.value === '' || isNaN(e.target.value)) {
+                                    setCountForProduct(item.id, 0);
+                                  }
+                                }}
                                 style={{
-                                  width: '70px',
+                                  width: '75px',
                                   background: 'rgba(0, 0, 0, 0.5)',
-                                  color: (countedMap[item.id] ?? 0) > 0 ? '#00d4ff' : 'var(--text-secondary)',
-                                  borderColor: (countedMap[item.id] ?? 0) > 0 ? '#00d4ff55' : 'var(--border-color)',
+                                  color: (Number(countedMap[item.id]) || 0) > 0 ? '#00d4ff' : 'var(--text-secondary)',
+                                  borderColor: (Number(countedMap[item.id]) || 0) > 0 ? '#00d4ff55' : 'var(--border-color)',
                                   fontSize: '15px',
                                 }}
                               />
@@ -1406,9 +1692,16 @@ export default function ConteoFisicoPage() {
                     >
                       {/* Cabecera Tarjeta: SKU y Categoría */}
                       <div className="d-flex justify-content-between align-items-center mb-2">
-                        <code className="text-info fw-bold" style={{ fontSize: '13px' }}>
-                          {item.sku}
-                        </code>
+                        <div className="d-flex align-items-center gap-1">
+                          <code className="text-info fw-bold" style={{ fontSize: '13px' }}>
+                            {item.sku}
+                          </code>
+                          {item.isExtra && (
+                            <span className="badge bg-warning text-dark" style={{ fontSize: '9px' }}>
+                              NUEVO
+                            </span>
+                          )}
+                        </div>
                         <span
                           className="badge"
                           style={{
@@ -1474,12 +1767,20 @@ export default function ConteoFisicoPage() {
                             −
                           </button>
                           <input
-                            type="number"
-                            min="0"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             className="btn btn-dark text-info fw-bold font-monospace text-center"
-                            style={{ width: '65px', minHeight: '42px', fontSize: '16px', border: '1px solid rgba(255, 255, 255, 0.1)' }}
-                            value={countedMap[item.id] ?? 0}
+                            style={{ width: '70px', minHeight: '42px', fontSize: '16px', border: '1px solid rgba(255, 255, 255, 0.1)' }}
+                            value={countedMap[item.id] === '' ? '' : (countedMap[item.id] ?? 0)}
+                            placeholder="0"
+                            onFocus={(e) => e.target.select()}
                             onChange={(e) => setCountForProduct(item.id, e.target.value)}
+                            onBlur={(e) => {
+                              if (e.target.value === '' || isNaN(e.target.value)) {
+                                setCountForProduct(item.id, 0);
+                              }
+                            }}
                           />
                           <button
                             type="button"
@@ -1632,6 +1933,11 @@ export default function ConteoFisicoPage() {
                           </td>
                           <td>
                             <code className="text-info fw-bold">{diffItem.sku}</code>
+                            {diffItem.isExtra && (
+                              <span className="badge bg-warning text-dark ms-1" style={{ fontSize: '9px' }}>
+                                NUEVO
+                              </span>
+                            )}
                           </td>
                           <td className="text-light fw-semibold">{diffItem.name}</td>
                           <td>
@@ -1690,10 +1996,34 @@ export default function ConteoFisicoPage() {
               {/* Mensaje de escaneo */}
               {lastScannedMsg && (
                 <div
-                  className={`alert ${lastScannedMsg.success ? 'alert-success' : 'alert-danger'} p-2 small mb-3 d-flex align-items-center gap-2`}
+                  className={`alert ${lastScannedMsg.success ? 'alert-success' : 'alert-warning'} p-2 small mb-3`}
                 >
-                  <i className={`bi ${lastScannedMsg.success ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'}`}></i>
-                  <span>{lastScannedMsg.text}</span>
+                  <div className="d-flex align-items-center gap-2">
+                    <i className={`bi ${lastScannedMsg.success ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'}`}></i>
+                    <span>{lastScannedMsg.text}</span>
+                  </div>
+                  {!lastScannedMsg.success && lastScannedMsg.unmatchedCode && (
+                    <div className="mt-2 pt-2 border-top border-secondary">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-info text-dark fw-bold"
+                        onClick={() => {
+                          setNewProductForm({
+                            sku: lastScannedMsg.unmatchedCode,
+                            name: '',
+                            category: 'PLANCHAS',
+                            color: 'clear',
+                            countedQty: 1,
+                          });
+                          setShowScannerModal(false);
+                          setShowAddProductModal(true);
+                        }}
+                      >
+                        <i className="bi bi-plus-circle-fill me-1"></i>
+                        Agregar &quot;{lastScannedMsg.unmatchedCode}&quot; al conteo
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1735,7 +2065,129 @@ export default function ConteoFisicoPage() {
       )}
 
       {/* ==================================================================== */}
-      {/* MODAL 2: APLICAR CONTEO AL INVENTARIO REAL */}
+      {/* MODAL 2: AGREGAR PRODUCTO NO LISTADO AL CONTEO */}
+      {/* ==================================================================== */}
+      {showAddProductModal && (
+        <div className="modal-overlay" onClick={() => setShowAddProductModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title d-flex align-items-center gap-2 text-info">
+                <i className="bi bi-plus-circle-fill"></i>
+                <span>Agregar Producto al Conteo Físico</span>
+              </h2>
+              <button
+                className="modal-close"
+                onClick={() => setShowAddProductModal(false)}
+                aria-label="Cerrar modal"
+              >
+                <i className="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <form onSubmit={handleAddExtraProduct}>
+              <div className="modal-body">
+                <p className="text-secondary small mb-3">
+                  Registra un producto encontrado físicamente en bodega que no figuraba en el sistema o deseas contabilizar directamente.
+                </p>
+
+                <div className="mb-3">
+                  <label className="form-label small fw-bold">SKU / Código *</label>
+                  <input
+                    type="text"
+                    className="form-control bg-dark border-secondary text-light"
+                    placeholder="Ej: PLANCHA-OND-001"
+                    value={newProductForm.sku}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, sku: e.target.value })}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label small fw-bold">Nombre / Descripción del Producto *</label>
+                  <input
+                    type="text"
+                    className="form-control bg-dark border-secondary text-light"
+                    placeholder="Ej: Plancha Ondulada Zinc 0.81x2.0m"
+                    value={newProductForm.name}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="row g-2 mb-3">
+                  <div className="col-12 col-sm-6">
+                    <label className="form-label small fw-bold">Categoría / Familia</label>
+                    <select
+                      className="form-select bg-dark border-secondary text-light"
+                      value={newProductForm.category}
+                      onChange={(e) => setNewProductForm({ ...newProductForm, category: e.target.value })}
+                    >
+                      <option value="ALVEOLAR">ALVEOLAR (Plancha)</option>
+                      <option value="ONDULADAS">ONDULADAS (Plancha)</option>
+                      <option value="PACK">PACK (Plancha)</option>
+                      <option value="INDUSTRIAL">INDUSTRIAL (Plancha)</option>
+                      <option value="COMPACTO">COMPACTO (Plancha)</option>
+                      <option value="PERFILES">PERFILES</option>
+                      <option value="ACCESORIOS">ACCESORIOS</option>
+                      <option value="PINTURAS Y ADHESIVOS">PINTURAS Y ADHESIVOS</option>
+                      <option value="OTROS">OTROS</option>
+                    </select>
+                  </div>
+
+                  <div className="col-12 col-sm-6">
+                    <label className="form-label small fw-bold">Tono (si aplica)</label>
+                    <select
+                      className="form-select bg-dark border-secondary text-light"
+                      value={newProductForm.color}
+                      onChange={(e) => setNewProductForm({ ...newProductForm, color: e.target.value })}
+                    >
+                      <option value="clear">Clear (Transparente)</option>
+                      <option value="opal">Opal (Blanco lechoso)</option>
+                      <option value="bronce">Bronce (Ahumado)</option>
+                      <option value="">No aplica</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label small fw-bold">Cantidad Física Contada *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="form-control bg-dark border-secondary text-info fw-bold font-monospace fs-5"
+                    value={newProductForm.countedQty}
+                    onChange={(e) => setNewProductForm({ ...newProductForm, countedQty: e.target.value })}
+                    required
+                  />
+                  <small className="text-secondary" style={{ fontSize: '11px' }}>
+                    En el sistema aparecerá con stock previo 0 y diferencia positiva (+{newProductForm.countedQty} uds).
+                  </small>
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAddProductModal(false)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-info text-dark fw-bold d-inline-flex align-items-center gap-2"
+                >
+                  <i className="bi bi-plus-circle-fill"></i>
+                  <span>Agregar al Conteo</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* MODAL 3: APLICAR CONTEO AL INVENTARIO REAL */}
       {/* ==================================================================== */}
       {showApplyModal && (
         <div className="modal-overlay" onClick={() => !applying && setShowApplyModal(false)}>
@@ -1820,7 +2272,7 @@ export default function ConteoFisicoPage() {
       )}
 
       {/* ==================================================================== */}
-      {/* MODAL 3: CONFIRMAR REINICIO A CERO */}
+      {/* MODAL 4: CONFIRMAR REINICIO A CERO */}
       {/* ==================================================================== */}
       {showResetModal && (
         <div className="modal-overlay" onClick={() => setShowResetModal(false)}>

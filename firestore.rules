@@ -38,8 +38,17 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
-    // 4. Reportes y Sesiones de Comparación de Excel
+    // 4. Reportes y Sesiones de Comparación de Excel y Auditoría
     match /comparisons/{comparisonId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /inventory_sessions/{sessionId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // 5. Conteo Físico y Auditoría en Vivo (Multi-dispositivo)
+    match /active_physical_audit/{docId} {
       allow read, write: if isAuthenticated();
     }
   }
