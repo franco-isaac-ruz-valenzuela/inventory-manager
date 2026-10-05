@@ -1,5 +1,6 @@
 import { db } from './firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getUserDisplayName } from '../contexts/AuthContext';
 
 /**
  * Registra una acción en el log de auditoría
@@ -14,7 +15,7 @@ export async function logAction(action, user, details = {}) {
     await addDoc(collection(db, 'audit_log'), {
       action,
       userId: user?.uid || 'anonimo',
-      userName: user?.displayName || user?.email || 'Usuario',
+      userName: getUserDisplayName(user),
       userEmail: user?.email || '',
       timestamp: serverTimestamp(),
       details: {

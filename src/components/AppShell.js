@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 
 function AppContent({ children }) {
-  const { currentUser, loading, canEdit } = useAuth();
+  const { currentUser, loading, canEdit, userDisplayName } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
 
@@ -78,7 +78,7 @@ function AppContent({ children }) {
           {currentUser && (
             <div className="topbar-user-badge" title={`Rol: ${canEdit ? 'Editor autorizado' : 'Solo lectura'}`}>
               <span className="topbar-user-dot" style={{ background: canEdit ? '#10b981' : '#f59e0b' }} />
-              <span>{currentUser.displayName || currentUser.email?.split('@')[0]}</span>
+              <span>{userDisplayName || currentUser.displayName || currentUser.email?.split('@')[0]}</span>
               <span style={{
                 fontSize: '10px',
                 marginLeft: '4px',

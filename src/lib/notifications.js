@@ -1,4 +1,5 @@
 import { db } from './firebase';
+import { getUserDisplayName } from '../contexts/AuthContext';
 import {
   collection,
   addDoc,
@@ -21,8 +22,8 @@ export async function sendNotification(type, message, user) {
     await addDoc(collection(db, 'notifications'), {
       type,
       message,
-      userId: user.uid,
-      userName: user.displayName || user.email,
+      userId: user?.uid || 'anonimo',
+      userName: getUserDisplayName(user),
       timestamp: serverTimestamp(),
       readBy: [],
     });

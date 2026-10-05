@@ -18,7 +18,7 @@ const navItems = [
 
 export default function Sidebar({ isOpen, onClose }) {
   const pathname = usePathname();
-  const { currentUser, logout, canEdit } = useAuth();
+  const { currentUser, logout, canEdit, userDisplayName, userInitial: contextInitial } = useAuth();
 
   const handleLogout = async () => {
     try {
@@ -28,9 +28,9 @@ export default function Sidebar({ isOpen, onClose }) {
     }
   };
 
-  const userInitial = currentUser?.displayName
+  const initial = contextInitial || (currentUser?.displayName
     ? currentUser.displayName.charAt(0).toUpperCase()
-    : currentUser?.email?.charAt(0).toUpperCase() || '?';
+    : currentUser?.email?.charAt(0).toUpperCase() || '?');
 
   return (
     <>
@@ -78,10 +78,10 @@ export default function Sidebar({ isOpen, onClose }) {
         </nav>
 
         <div className="sidebar-user">
-          <div className="sidebar-user-avatar">{userInitial}</div>
+          <div className="sidebar-user-avatar">{initial}</div>
           <div className="sidebar-user-info">
             <div className="sidebar-user-name">
-              {currentUser?.displayName || 'Usuario'}
+              {userDisplayName || currentUser?.displayName || 'Usuario'}
             </div>
             <div className="sidebar-user-email">{currentUser?.email}</div>
             <div style={{ marginTop: '3px' }}>
