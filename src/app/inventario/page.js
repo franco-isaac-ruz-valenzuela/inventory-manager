@@ -1888,8 +1888,8 @@ export default function InventarioPage() {
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
-            <form onSubmit={handleSave}>
-              <div className="modal-body">
+            <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div className="modal-body" style={{ overflowY: 'auto', flex: '1 1 auto', minHeight: 0, paddingBottom: '28px' }}>
                 <div className="form-group">
                   <label className="form-label">SKU / Código</label>
                   <input
@@ -2013,47 +2013,73 @@ export default function InventarioPage() {
 
                         {/* Botones de suma rápida */}
                         <div className="mb-3">
-                          <div className="text-secondary mb-1" style={{ fontSize: '11px' }}>
-                            Sumar rápido con un toque:
+                          <div className="text-secondary mb-1" style={{ fontSize: '11px', fontWeight: 600 }}>
+                            Sumar o restar rápido con un toque:
                           </div>
-                          <div className="d-flex flex-wrap gap-1">
-                            {[1, 2, 5, 10, 20, 50, 100].map((inc) => (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
+                            {[1, 2, 5, 10, 20].map((inc) => (
                               <button
                                 key={inc}
                                 type="button"
-                                className="btn btn-sm btn-outline-info flex-fill"
+                                className="btn btn-sm btn-outline-info text-center justify-content-center fw-bold"
                                 onClick={() => {
                                   const current = evaluateMathInput(quantityToAdd);
                                   setQuantityToAdd(String(current + inc));
                                 }}
-                                style={{ minHeight: '34px', fontSize: '12px', padding: '4px 8px' }}
+                                style={{ minHeight: '36px', fontSize: '12px', padding: '4px 2px' }}
+                              >
+                                +{inc}
+                              </button>
+                            ))}
+                            {[50, 100].map((inc) => (
+                              <button
+                                key={inc}
+                                type="button"
+                                className="btn btn-sm btn-outline-info text-center justify-content-center fw-bold"
+                                onClick={() => {
+                                  const current = evaluateMathInput(quantityToAdd);
+                                  setQuantityToAdd(String(current + inc));
+                                }}
+                                style={{ minHeight: '36px', fontSize: '12px', padding: '4px 2px' }}
                               >
                                 +{inc}
                               </button>
                             ))}
                             <button
                               type="button"
-                              className="btn btn-sm btn-outline-warning"
+                              className="btn btn-sm btn-outline-warning text-center justify-content-center fw-bold"
                               onClick={() => {
                                 const current = evaluateMathInput(quantityToAdd);
                                 setQuantityToAdd(String(current - 1));
                               }}
-                              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 8px' }}
+                              style={{ minHeight: '36px', fontSize: '12px', padding: '4px 2px' }}
                               title="Restar 1"
                             >
                               -1
                             </button>
                             <button
                               type="button"
-                              className="btn btn-sm btn-outline-warning"
+                              className="btn btn-sm btn-outline-warning text-center justify-content-center fw-bold"
                               onClick={() => {
                                 const current = evaluateMathInput(quantityToAdd);
                                 setQuantityToAdd(String(current - 5));
                               }}
-                              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 8px' }}
+                              style={{ minHeight: '36px', fontSize: '12px', padding: '4px 2px' }}
                               title="Restar 5"
                             >
                               -5
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-warning text-center justify-content-center fw-bold"
+                              onClick={() => {
+                                const current = evaluateMathInput(quantityToAdd);
+                                setQuantityToAdd(String(current - 10));
+                              }}
+                              style={{ minHeight: '36px', fontSize: '12px', padding: '4px 2px' }}
+                              title="Restar 10"
+                            >
+                              -10
                             </button>
                           </div>
                         </div>
@@ -2141,7 +2167,7 @@ export default function InventarioPage() {
                   </div>
                 )}
               </div>
-              <div className="modal-footer">
+              <div className="modal-footer" style={{ flexShrink: 0, zIndex: 10 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)} style={{ minHeight: '42px' }}>
                   Cancelar
                 </button>
