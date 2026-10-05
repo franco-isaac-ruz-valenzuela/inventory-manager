@@ -2,7 +2,7 @@
  * Configuración centralizada de umbrales de Stock Bajo por Categoría
  * Reglas de negocio personalizadas:
  * - Accesorios: < 5 uds
- * - Onduladas / Greca: < 50 uds
+ * - Onduladas: < 50 uds
  * - Compacto: < 3 uds
  * - Industrial: < 20 uds
  * - Perfiles: < 30 uds
@@ -30,7 +30,7 @@ export const DEFAULT_LOW_STOCK_THRESHOLD = 5;
  * Determina si un producto o ítem debe ser ignorado en temas de alertas y cálculo de stock bajo:
  * 1. Pinturas y Adhesivos: ignoradas siempre (nunca alertan).
  * 2. Todo lo de 8.70 (o 8,70) en temas de perfiles y planchas: ignorado (ej: ALVEOLAR 8.70, PERFIL H 8,70, etc.).
- * 3. CLEAR 0,81X1 y 001 - PC ONDULADO D y G 0,81X1: ignorado (todas las variantes de 0,81X1 en Ondulado D y G, Greca, Clear/Bronce/Opal).
+ * 3. CLEAR 0,81X1 y 001 - PC ONDULADO D y G 0,81X1: ignorado (todas las variantes de 0,81X1 en Ondulado D y G, Clear/Bronce/Opal).
  * @param {Object|string} productOrCategory - Objeto producto o nombre de categoría
  * @param {Object} [productObj] - Objeto producto opcional si el primer parámetro fue categoría
  * @returns {boolean}
@@ -58,20 +58,18 @@ export function isProductIgnoredFromStock(productOrCategory, productObj) {
   }
 
   // 2. Ignorar todo lo de 8.70 / 8,70 en temas de perfiles y planchas
-  // (perfiles: H, A, AF, CLIP, etc.; planchas: ALVEOLAR, ONDULADAS, GRECA, COMPACTO, INDUSTRIAL, PLANCHAS)
+  // (perfiles: H, A, AF, CLIP, etc.; planchas: ALVEOLAR, ONDULADAS, COMPACTO, INDUSTRIAL, PLANCHAS)
   const has870 = /8[.,]70/.test(fullText);
   const isPerfilOrPlancha =
     category.includes('PERFIL') ||
     category.includes('ALVEOLAR') ||
     category.includes('ONDULAD') ||
-    category.includes('GRECA') ||
     category.includes('PLANCHA') ||
     category.includes('COMPACT') ||
     category.includes('INDUSTRI') ||
     name.includes('PERFIL') ||
     name.includes('ALVEOLAR') ||
     name.includes('ONDULAD') ||
-    name.includes('GRECA') ||
     name.includes('PLANCHA') ||
     name.includes('COMPACT') ||
     name.includes('INDUSTRI');
@@ -81,16 +79,15 @@ export function isProductIgnoredFromStock(productOrCategory, productObj) {
   }
 
   // 3. CLEAR 0,81X1 y 001 - PC ONDULADO D y G 0,81X1
-  // Coincide con cualquier dimensión 0,81X1 / 0.81X1 en PC ONDULADO (D, G, Clear, Bronce, Opal), Greca o con prefijo 001
+  // Coincide con cualquier dimensión 0,81X1 / 0.81X1 en PC ONDULADO (D, G, Clear, Bronce, Opal) o con prefijo 001
   const has081x1 = /0[.,]81\s*[xX*]\s*1(\b|[^\d]|$)/.test(fullText);
   if (has081x1) {
     const isOndulado = category.includes('ONDULAD') || name.includes('ONDULAD') || fullText.includes('ONDULAD');
-    const isGreca = category.includes('GRECA') || name.includes('GRECA') || fullText.includes('GRECA');
     const hasClear = fullText.includes('CLEAR');
     const has001 = fullText.includes('001');
     const hasDyG = /D\s*(?:y|Y|&)\s*G/i.test(fullText) || /ONDULADO\s+[DG](\b|[^\w])/i.test(fullText);
 
-    if (isOndulado || isGreca || hasClear || has001 || hasDyG) {
+    if (isOndulado || hasClear || has001 || hasDyG) {
       return true;
     }
   }
@@ -137,7 +134,7 @@ export function getLowStockThreshold(category, product = null) {
 
   // Reglas por categoría solicitadas por el usuario:
   if (upper.includes('PERFIL')) return 30; // Los perfiles bajo 30 se alertan
-  if (upper.includes('ONDULAD') || upper.includes('GRECA')) return 50;
+  if (upper.includes('ONDULAD')) return 50;
   if (upper.includes('ALVEOLAR')) return 50;
   if (upper.includes('INDUSTRI')) return 20;
   if (upper.includes('ROLLO')) return 5;
@@ -185,3 +182,32 @@ export function getThresholdDescription(category, product = null) {
   if (t === null) return 'Sin alerta (ignorado)';
   return `< ${t} uds`;
 }
+
+/**
+ * Helper para clasificar por Familia / Tipo Principal
+ * @param {Object} p - Producto
+ * @returns {'planchas'|'perfiles'|'accesorios'|'pinturas'|'otros'}
+ */
+export function getProductMainType(p) {
+  const cat = (p?.category || '').toUpperCase();
+  const name = (p?.name || '').toUpperCase();
+  if (cat.includes('PERFIL') || name.includes('PERFIL')) return 'perfiles';
+  if (cat.includes('PINTUR') || cat.includes('ADHESIV') || name.includes('PINTUR') || name.includes('SILICON')) return 'pinturas';
+  if (cat.includes('ACCESORIO') || cat.includes('CANALETA') || name.includes('TORNILL') || name.includes('GOLILLA') || name.includes('CINTA') || name.includes('GANCHO') || name.includes('SOPORTE')) return 'accesorios';
+  if (['ALVEOLAR', 'ONDULAD', 'INDUSTRI', 'COMPACT', 'PACK', 'ROLLO', 'PLANCHA'].some((k) => cat.includes(k) || name.includes(k))) return 'planchas';
+  return 'otros';
+}
+
+/**
+ * Helper para detectar tono / color del producto (Clear, Opal, Bronce)
+ * @param {Object} p - Producto
+ * @returns {'clear'|'opal'|'bronce'|null}
+ */
+export function detectProductColor(p) {
+  const text = `${p?.name || ''} ${p?.sku || ''}`.toUpperCase();
+  if (/\bOPAL\b/.test(text)) return 'opal';
+  if (/\bBRONCE\b|\bBRONZ\b/.test(text)) return 'bronce';
+  if (/\bCLEAR\b|\bCRISTAL\b|\bTRANSPARENTE\b/.test(text)) return 'clear';
+  return null;
+}
+

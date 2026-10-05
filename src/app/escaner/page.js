@@ -427,8 +427,8 @@ export default function EscanerPage() {
 
           {/* Scan history */}
           <div className="card">
-            <div className="card-title" style={{ marginBottom: '12px' }}>
-              📋 Historial de Escaneos
+            <div className="card-title" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <i className="bi bi-clock-history" style={{ color: 'var(--accent-primary)' }}></i> Historial de Escaneos
             </div>
             {scanHistory.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px' }}>
@@ -447,7 +447,13 @@ export default function EscanerPage() {
                       borderBottom: '1px solid var(--border-color)',
                     }}
                   >
-                    <span>{scan.found ? '✅' : '❌'}</span>
+                    <span>
+                      {scan.found ? (
+                        <i className="bi bi-check-circle-fill text-success" style={{ fontSize: '1.1rem' }}></i>
+                      ) : (
+                        <i className="bi bi-x-circle-fill text-danger" style={{ fontSize: '1.1rem' }}></i>
+                      )}
+                    </span>
                     <div style={{ flex: 1 }}>
                       <code style={{ color: 'var(--accent-primary)', fontSize: 'var(--font-size-sm)' }}>
                         {scan.code}

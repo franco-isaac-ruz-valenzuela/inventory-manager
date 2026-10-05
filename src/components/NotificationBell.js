@@ -9,11 +9,19 @@ import {
   timeAgo,
 } from '../lib/notifications';
 
-const typeIcons = {
-  descuento: '📉',
-  agregado: '📈',
-  eliminado: '🗑️',
-  editado: '✏️',
+const getTypeIcon = (type) => {
+  switch (type) {
+    case 'descuento':
+      return <i className="bi bi-dash-circle-fill text-danger"></i>;
+    case 'agregado':
+      return <i className="bi bi-plus-circle-fill text-success"></i>;
+    case 'eliminado':
+      return <i className="bi bi-trash3-fill text-danger"></i>;
+    case 'editado':
+      return <i className="bi bi-pencil-square text-warning"></i>;
+    default:
+      return <i className="bi bi-info-circle-fill text-info"></i>;
+  }
 };
 
 export default function NotificationBell() {
@@ -64,7 +72,7 @@ export default function NotificationBell() {
         onClick={() => setIsOpen(!isOpen)}
         title="Notificaciones"
       >
-        🔔
+        <i className="bi bi-bell"></i>
         {unreadCount > 0 && (
           <span className="notification-badge">
             {unreadCount > 99 ? '99+' : unreadCount}
@@ -91,7 +99,7 @@ export default function NotificationBell() {
           <div className="notification-list">
             {notifications.length === 0 ? (
               <div className="notification-empty">
-                🔕 No hay notificaciones
+                <i className="bi bi-bell-slash me-2 text-secondary"></i> No hay notificaciones
               </div>
             ) : (
               notifications.map((notif) => (
@@ -103,7 +111,7 @@ export default function NotificationBell() {
                   onClick={() => handleNotificationClick(notif)}
                 >
                   <span className="notification-item-icon">
-                    {typeIcons[notif.type] || '📋'}
+                    {getTypeIcon(notif.type)}
                   </span>
                   <div className="notification-item-content">
                     <div className="notification-item-message">

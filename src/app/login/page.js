@@ -57,7 +57,7 @@ export default function LoginPage() {
             lineHeight: 1.4,
             textAlign: 'center'
           }}>
-            ⚙️ <strong>Paso siguiente:</strong> Configura tus credenciales de Firebase en el archivo <code>.env.local</code> para habilitar el inicio de sesión.
+            <i className="bi bi-gear-fill me-1"></i> <strong>Paso siguiente:</strong> Configura tus credenciales de Firebase en el archivo <code>.env.local</code> para habilitar el inicio de sesión.
           </div>
         )}
 

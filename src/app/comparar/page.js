@@ -125,7 +125,7 @@ export default function CompararPage() {
         summary: result.summary,
         differences: result.differences,
       });
-      alert('✅ Sesión guardada correctamente');
+      alert('Sesión guardada correctamente');
     } catch (err) {
       console.error('Error guardando sesión:', err);
       alert('Error al guardar la sesión');
@@ -178,16 +178,32 @@ export default function CompararPage() {
                 onChange={(e) => handleFileChange(e.target.files[0], 'previous')}
               />
               <div className="drop-zone-icon">
-                {previousFile ? '✅' : '📁'}
+                {previousFile ? (
+                  <i className="bi bi-file-earmark-check-fill text-success" style={{ fontSize: '2.5rem' }}></i>
+                ) : (
+                  <i className="bi bi-file-earmark-arrow-up text-secondary" style={{ fontSize: '2.5rem' }}></i>
+                )}
               </div>
               <div className="drop-zone-text">
                 {previousFile ? previousFile.name : 'Inventario ANTERIOR'}
               </div>
               <div className="drop-zone-hint">
-                {previousFile
-                  ? `${previousData?.length || 0} registros • ${previousCols?.detected ? 'Columnas detectadas ✓' : '⚠️ Revisar columnas'}`
-                  : 'Arrastra o haz click para seleccionar'
-                }
+                {previousFile ? (
+                  <span>
+                    {previousData?.length || 0} registros •{' '}
+                    {previousCols?.detected ? (
+                      <span className="text-success">
+                        <i className="bi bi-check-circle-fill me-1"></i>Columnas detectadas
+                      </span>
+                    ) : (
+                      <span className="text-warning">
+                        <i className="bi bi-exclamation-triangle-fill me-1"></i>Revisar columnas
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  'Arrastra o haz click para seleccionar'
+                )}
               </div>
             </div>
 
@@ -207,16 +223,32 @@ export default function CompararPage() {
                 onChange={(e) => handleFileChange(e.target.files[0], 'current')}
               />
               <div className="drop-zone-icon">
-                {currentFile ? '✅' : '📁'}
+                {currentFile ? (
+                  <i className="bi bi-file-earmark-check-fill text-success" style={{ fontSize: '2.5rem' }}></i>
+                ) : (
+                  <i className="bi bi-file-earmark-arrow-up text-secondary" style={{ fontSize: '2.5rem' }}></i>
+                )}
               </div>
               <div className="drop-zone-text">
                 {currentFile ? currentFile.name : 'Inventario ACTUAL'}
               </div>
               <div className="drop-zone-hint">
-                {currentFile
-                  ? `${currentData?.length || 0} registros • ${currentCols?.detected ? 'Columnas detectadas ✓' : '⚠️ Revisar columnas'}`
-                  : 'Arrastra o haz click para seleccionar'
-                }
+                {currentFile ? (
+                  <span>
+                    {currentData?.length || 0} registros •{' '}
+                    {currentCols?.detected ? (
+                      <span className="text-success">
+                        <i className="bi bi-check-circle-fill me-1"></i>Columnas detectadas
+                      </span>
+                    ) : (
+                      <span className="text-warning">
+                        <i className="bi bi-exclamation-triangle-fill me-1"></i>Revisar columnas
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  'Arrastra o haz click para seleccionar'
+                )}
               </div>
             </div>
           </div>
@@ -224,8 +256,8 @@ export default function CompararPage() {
           {/* Column detection info */}
           {(previousCols || currentCols) && (
             <div className="card" style={{ marginBottom: '16px' }}>
-              <div className="card-title" style={{ marginBottom: '12px' }}>
-                📊 Columnas detectadas
+              <div className="card-title" style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <i className="bi bi-layout-three-columns text-info"></i> Columnas detectadas
               </div>
               <div className="detected-cols-grid">
                 {previousCols && (
@@ -234,9 +266,9 @@ export default function CompararPage() {
                       Archivo anterior:
                     </strong>
                     <div style={{ fontSize: 'var(--font-size-sm)', marginTop: '4px' }}>
-                      SKU: <code>{previousCols.sku || '❌ No detectada'}</code> •
-                      Nombre: <code>{previousCols.name || '❌ No detectada'}</code> •
-                      Cantidad: <code>{previousCols.quantity || '❌ No detectada'}</code>
+                      SKU: <code>{previousCols.sku || 'No detectada'}</code> •
+                      Nombre: <code>{previousCols.name || 'No detectada'}</code> •
+                      Cantidad: <code>{previousCols.quantity || 'No detectada'}</code>
                     </div>
                   </div>
                 )}
@@ -246,9 +278,9 @@ export default function CompararPage() {
                       Archivo actual:
                     </strong>
                     <div style={{ fontSize: 'var(--font-size-sm)', marginTop: '4px' }}>
-                      SKU: <code>{currentCols.sku || '❌ No detectada'}</code> •
-                      Nombre: <code>{currentCols.name || '❌ No detectada'}</code> •
-                      Cantidad: <code>{currentCols.quantity || '❌ No detectada'}</code>
+                      SKU: <code>{currentCols.sku || 'No detectada'}</code> •
+                      Nombre: <code>{currentCols.name || 'No detectada'}</code> •
+                      Cantidad: <code>{currentCols.quantity || 'No detectada'}</code>
                     </div>
                   </div>
                 )}
@@ -261,6 +293,7 @@ export default function CompararPage() {
               className="btn btn-primary btn-lg"
               disabled={!canCompare || loading}
               onClick={handleCompare}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
             >
               {loading ? (
                 <>
@@ -268,7 +301,9 @@ export default function CompararPage() {
                   Comparando...
                 </>
               ) : (
-                '🔄 Comparar Inventarios'
+                <>
+                  <i className="bi bi-arrow-left-right"></i> Comparar Inventarios
+                </>
               )}
             </button>
           </div>
@@ -353,9 +388,20 @@ export default function CompararPage() {
                         <span className={`badge badge-${
                           diff.status === 'nuevo' ? 'success' :
                           diff.status === 'eliminado' ? 'danger' : 'warning'
-                        }`}>
-                          {diff.status === 'nuevo' ? '🟢 Nuevo' :
-                           diff.status === 'eliminado' ? '🔴 Eliminado' : '🟡 Modificado'}
+                        }`} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          {diff.status === 'nuevo' ? (
+                            <>
+                              <i className="bi bi-plus-circle-fill"></i> Nuevo
+                            </>
+                          ) : diff.status === 'eliminado' ? (
+                            <>
+                              <i className="bi bi-dash-circle-fill"></i> Eliminado
+                            </>
+                          ) : (
+                            <>
+                              <i className="bi bi-pencil-fill"></i> Modificado
+                            </>
+                          )}
                         </span>
                       </td>
                       <td>
@@ -384,7 +430,9 @@ export default function CompararPage() {
           ) : (
             <div className="card">
               <div className="empty-state">
-                <div className="empty-state-icon">✅</div>
+                <div className="empty-state-icon" style={{ color: 'var(--success)' }}>
+                  <i className="bi bi-check-circle-fill" style={{ fontSize: '3rem' }}></i>
+                </div>
                 <div className="empty-state-title">Sin diferencias</div>
                 <div className="empty-state-text">
                   Los dos inventarios son idénticos

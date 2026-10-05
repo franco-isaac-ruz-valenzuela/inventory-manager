@@ -343,7 +343,6 @@ const PALETTE = {
 // Paleta cromática por categoría
 const CATEGORY_COLORS = {
   'ONDULADAS': { brand: '0891B2', tint: 'ECFEFF', text: '164E63' },
-  'GRECA': { brand: '7C3AED', tint: 'F5F3FF', text: '5B21B6' },
   'ALVEOLAR': { brand: '059669', tint: 'ECFDF5', text: '065F46' },
   'PERFILES': { brand: 'D97706', tint: 'FFFBEB', text: '92400E' },
   'INDUSTRIAL': { brand: 'DC2626', tint: 'FEF2F2', text: '991B1B' },

@@ -65,7 +65,7 @@ export default function ReportesPage() {
       {sessions.length === 0 ? (
         <div className="card">
           <div className="empty-state">
-            <div className="empty-state-icon">📊</div>
+            <div className="empty-state-icon"><i className="bi bi-bar-chart-line text-info"></i></div>
             <div className="empty-state-title">Sin reportes aún</div>
             <div className="empty-state-text">
               Los reportes aparecerán aquí cuando guardes una comparación de inventarios
@@ -85,13 +85,25 @@ export default function ReportesPage() {
                     Creado por {session.createdByName || 'Desconocido'} • {timeAgo(session.createdAt)}
                   </p>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <span className="badge badge-info">
-                      📁 {session.previousFile}
-                    </span>
-                    <span style={{ color: 'var(--text-muted)' }}>vs</span>
-                    <span className="badge badge-info">
-                      📁 {session.currentFile}
-                    </span>
+                    {session.auditType === 'conteo_fisico_bodega' ? (
+                      <span className="badge badge-info d-inline-flex align-items-center gap-1" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff' }}>
+                        <i className="bi bi-clipboard2-check"></i> Auditoría Física de Bodega
+                      </span>
+                    ) : session.auditType === 'conciliacion_directa' ? (
+                      <span className="badge badge-warning d-inline-flex align-items-center gap-1">
+                        <i className="bi bi-check2-all"></i> Conciliación Aplicada
+                      </span>
+                    ) : (
+                      <>
+                        <span className="badge badge-info d-inline-flex align-items-center gap-1">
+                          <i className="bi bi-file-earmark-spreadsheet"></i> {session.previousFile}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)' }}>vs</span>
+                        <span className="badge badge-info d-inline-flex align-items-center gap-1">
+                          <i className="bi bi-file-earmark-spreadsheet"></i> {session.currentFile}
+                        </span>
+                      </>
+                    )}
                   </div>
                   {session.summary && (
                     <div style={{ display: 'flex', gap: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
@@ -103,18 +115,19 @@ export default function ReportesPage() {
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                   <button
-                    className="btn btn-sm btn-secondary"
+                    className="btn btn-sm btn-secondary d-inline-flex align-items-center gap-1"
                     onClick={() => setSelectedSession(
                       selectedSession?.id === session.id ? null : session
                     )}
                   >
-                    {selectedSession?.id === session.id ? '▲ Ocultar' : '▼ Ver Detalles'}
+                    <i className={`bi ${selectedSession?.id === session.id ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
+                    {selectedSession?.id === session.id ? 'Ocultar' : 'Ver Detalles'}
                   </button>
                   <button
-                    className="btn btn-sm btn-primary"
+                    className="btn btn-sm btn-primary d-inline-flex align-items-center gap-1"
                     onClick={() => handleDownload(session)}
                   >
-                    📥 Excel
+                    <i className="bi bi-download"></i> Excel
                   </button>
                 </div>
               </div>
@@ -141,9 +154,9 @@ export default function ReportesPage() {
                               <span className={`badge badge-${
                                 diff.status === 'nuevo' ? 'success' :
                                 diff.status === 'eliminado' ? 'danger' : 'warning'
-                              }`}>
-                                {diff.status === 'nuevo' ? '🟢 Nuevo' :
-                                 diff.status === 'eliminado' ? '🔴 Eliminado' : '🟡 Modificado'}
+                              } d-inline-flex align-items-center gap-1`}>
+                                {diff.status === 'nuevo' ? <><i className="bi bi-plus-circle"></i> Nuevo</> :
+                                 diff.status === 'eliminado' ? <><i className="bi bi-dash-circle"></i> Eliminado</> : <><i className="bi bi-pencil"></i> Modificado</>}
                               </span>
                             </td>
                             <td><code>{diff.sku}</code></td>

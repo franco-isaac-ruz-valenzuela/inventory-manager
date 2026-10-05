@@ -90,9 +90,18 @@ export default function DashboardPage() {
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <h1 className="page-title">Dashboard</h1>
-        <p className="page-description">Resumen general del inventario</p>
+      <div className="page-header d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+        <div>
+          <h1 className="page-title mb-0">Dashboard</h1>
+          <p className="page-description mb-0">Resumen general del inventario</p>
+        </div>
+        <Link
+          href="/conteo"
+          className="btn btn-outline-info text-info btn-sm d-inline-flex align-items-center gap-2"
+        >
+          <i className="bi bi-clipboard2-check"></i>
+          <span>Toma de Conteo Físico</span>
+        </Link>
       </div>
 
       {/* Stats */}
@@ -228,13 +237,16 @@ export default function DashboardPage() {
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', maxWidth: '520px' }}>
             <div className="modal-header">
               <div>
-                <h2 className="modal-title">⚠️ Stock Bajo por Categoría</h2>
+                <h2 className="modal-title d-flex align-items-center gap-2">
+                  <i className="bi bi-exclamation-triangle-fill text-warning"></i>
+                  <span>Stock Bajo por Categoría</span>
+                </h2>
                 <p className="text-secondary small mb-0 mt-1">
                   Total de {stats.lowStock} productos que requieren reposición
                 </p>
               </div>
               <button className="modal-close" onClick={() => setShowLowStockModal(false)}>
-                ✕
+                <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <div className="modal-body p-3">
@@ -256,8 +268,9 @@ export default function DashboardPage() {
                     );
                   })}
               </div>
-              <div className="p-2 rounded text-secondary small" style={{ background: 'rgba(255, 255, 255, 0.03)', fontSize: '12px' }}>
-                💡 <em>Pinturas y Adhesivos están configuradas para no alertar según las reglas del negocio.</em>
+              <div className="p-2 rounded text-secondary small d-flex align-items-center gap-2" style={{ background: 'rgba(255, 255, 255, 0.03)', fontSize: '12px' }}>
+                <i className="bi bi-info-circle text-info"></i>
+                <em>Pinturas y Adhesivos están configuradas para no alertar según las reglas del negocio.</em>
               </div>
             </div>
             <div className="modal-footer d-flex gap-2">

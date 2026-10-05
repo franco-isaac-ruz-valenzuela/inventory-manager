@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { db } from '../../lib/firebase';
 import {
   collection,
@@ -39,9 +40,11 @@ export default function InventarioPage() {
   const [modalNotaPedido, setModalNotaPedido] = useState('');
   const [updatingProductIds, setUpdatingProductIds] = useState(new Set());
 
-  // Estados para Categorías y Filtro por Tipo
+  // Estados para Familias, Categorías, Tono / Color y Filtro de Stock
+  const [selectedMainType, setSelectedMainType] = useState('all'); // 'all' | 'planchas' | 'perfiles' | 'accesorios' | 'pinturas'
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedType, setSelectedType] = useState('all'); // 'all' | 'planchas' | 'perfiles' | 'accesorios' | 'rollos' | 'pinturas' | 'bajo_stock' | 'faltantes' | 'sin_stock' | 'ignorados'
+  const [selectedColor, setSelectedColor] = useState('all'); // 'all' | 'clear' | 'opal' | 'bronce'
+  const [selectedStockStatus, setSelectedStockStatus] = useState('all'); // 'all' | 'bajo_stock' | 'ignorados'
   const [viewMode, setViewMode] = useState('flat'); // 'flat' | 'grouped'
   const [openSections, setOpenSections] = useState(new Set());
 
@@ -106,7 +109,6 @@ export default function InventarioPage() {
   // Colores asignados por categoría
   const CATEGORY_COLORS = {
     'ONDULADAS': { bg: 'rgba(0, 212, 255, 0.12)', color: '#00d4ff', icon: 'bi-water' },
-    'GRECA': { bg: 'rgba(124, 58, 237, 0.12)', color: '#8b5cf6', icon: 'bi-layers' },
     'ALVEOLAR': { bg: 'rgba(16, 185, 129, 0.12)', color: '#10b981', icon: 'bi-grid-3x3' },
     'PERFILES': { bg: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', icon: 'bi-rulers' },
     'INDUSTRIAL': { bg: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', icon: 'bi-building' },
@@ -127,39 +129,60 @@ export default function InventarioPage() {
     return CATEGORY_COLORS[upper] || CATEGORY_COLORS['SIN CATEGORÍA'];
   };
 
-  // Conteos calculados para el filtro por tipo
-  const typeCounts = {
+  // Helper para clasificar por Familia / Tipo Principal
+  const getProductMainType = (p) => {
+    const cat = (p?.category || '').toUpperCase();
+    const name = (p?.name || '').toUpperCase();
+    if (cat.includes('PERFIL') || name.includes('PERFIL')) return 'perfiles';
+    if (cat.includes('PINTUR') || cat.includes('ADHESIV') || name.includes('PINTUR') || name.includes('SILICON')) return 'pinturas';
+    if (cat.includes('ACCESORIO') || cat.includes('CANALETA') || name.includes('TORNILL') || name.includes('GOLILLA') || name.includes('CINTA') || name.includes('GANCHO') || name.includes('SOPORTE')) return 'accesorios';
+    if (['ALVEOLAR', 'ONDULAD', 'INDUSTRI', 'COMPACT', 'PACK', 'ROLLO', 'PLANCHA'].some((k) => cat.includes(k) || name.includes(k))) return 'planchas';
+    return 'otros';
+  };
+
+  // Helper para detectar tono / color del producto (Clear, Opal, Bronce)
+  const detectProductColor = (p) => {
+    const text = `${p?.name || ''} ${p?.sku || ''}`.toUpperCase();
+    if (/\bOPAL\b/.test(text)) return 'opal';
+    if (/\bBRONCE\b/.test(text)) return 'bronce';
+    if (/\bCLEAR\b/.test(text) || /\bTRANSPARENTE\b/.test(text)) return 'clear';
+    return 'otro';
+  };
+
+  // Conteos calculados para la familia principal
+  const mainTypeCounts = {
     all: products.length,
-    planchas: products.filter((p) => {
-      const c = (p.category || '').toUpperCase();
-      const n = (p.name || '').toUpperCase();
-      return (
-        c.includes('ONDULAD') ||
-        c.includes('GRECA') ||
-        c.includes('ALVEOLAR') ||
-        c.includes('COMPACT') ||
-        c.includes('INDUSTRI') ||
-        c.includes('PLANCHA') ||
-        n.includes('ONDULAD') ||
-        n.includes('GRECA') ||
-        n.includes('ALVEOLAR') ||
-        n.includes('PLANCHA')
-      );
-    }).length,
-    perfiles: products.filter((p) => {
-      const c = (p.category || '').toUpperCase();
-      const n = (p.name || '').toUpperCase();
-      return c.includes('PERFIL') || n.includes('PERFIL');
-    }).length,
-    accesorios: products.filter((p) => {
-      const c = (p.category || '').toUpperCase();
-      const n = (p.name || '').toUpperCase();
-      return c.includes('ACCESORIO') || c.includes('CANALETA') || n.includes('TORNILL') || n.includes('GOLILLA');
-    }).length,
-    rollos: products.filter((p) => (p.category || '').toUpperCase().includes('ROLLO')).length,
-    bajo_stock: products.filter((p) => isLowStock(p)).length,
-    faltantes: products.filter((p) => (Number(p.quantity) || 0) < 0).length,
-    sin_stock: products.filter((p) => (Number(p.quantity) || 0) === 0).length,
+    planchas: products.filter((p) => getProductMainType(p) === 'planchas').length,
+    perfiles: products.filter((p) => getProductMainType(p) === 'perfiles').length,
+    accesorios: products.filter((p) => getProductMainType(p) === 'accesorios').length,
+    pinturas: products.filter((p) => getProductMainType(p) === 'pinturas').length,
+  };
+
+  // Planchas y sus categorías específicas para el subfiltro
+  const planchaProducts = products.filter((p) => getProductMainType(p) === 'planchas');
+  const planchaCategories = Object.keys(
+    planchaProducts.reduce((acc, p) => {
+      const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
+      acc[cat] = (acc[cat] || 0) + 1;
+      return acc;
+    }, {})
+  ).sort();
+
+  // Base para conteos de tono en Planchas (si hay una categoría específica seleccionada, se ajusta a ella)
+  const activePlanchaBase = selectedCategory !== 'all'
+    ? planchaProducts.filter((p) => (p.category || 'SIN CATEGORÍA').toUpperCase() === selectedCategory)
+    : planchaProducts;
+
+  const planchaColorCounts = {
+    all: activePlanchaBase.length,
+    clear: activePlanchaBase.filter((p) => detectProductColor(p) === 'clear').length,
+    opal: activePlanchaBase.filter((p) => detectProductColor(p) === 'opal').length,
+    bronce: activePlanchaBase.filter((p) => detectProductColor(p) === 'bronce').length,
+  };
+
+  // Conteos calculados para stock
+  const stockCounts = {
+    bajo_stock: products.filter((p) => isLowStock(p) && !isProductIgnoredFromStock(p)).length,
     ignorados: products.filter((p) => isProductIgnoredFromStock(p)).length,
   };
 
@@ -167,58 +190,33 @@ export default function InventarioPage() {
     const s = search.toLowerCase();
     const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
     const name = (p.name || '').toUpperCase();
+    const sku = (p.sku || '').toUpperCase();
 
     const matchesSearch =
-      p.sku?.toLowerCase().includes(s) ||
-      p.name?.toLowerCase().includes(s) ||
+      sku.toLowerCase().includes(s) ||
+      name.toLowerCase().includes(s) ||
       cat.toLowerCase().includes(s);
+
+    let matchesMainType = true;
+    if (selectedMainType !== 'all') {
+      matchesMainType = getProductMainType(p) === selectedMainType;
+    }
 
     const matchesCategory =
       selectedCategory === 'all' || cat === selectedCategory;
 
-    let matchesType = true;
-    if (selectedType === 'planchas') {
-      matchesType =
-        cat.includes('ONDULAD') ||
-        cat.includes('GRECA') ||
-        cat.includes('ALVEOLAR') ||
-        cat.includes('COMPACT') ||
-        cat.includes('INDUSTRI') ||
-        cat.includes('PLANCHA') ||
-        name.includes('ONDULAD') ||
-        name.includes('GRECA') ||
-        name.includes('ALVEOLAR') ||
-        name.includes('COMPACT') ||
-        name.includes('PLANCHA');
-    } else if (selectedType === 'perfiles') {
-      matchesType = cat.includes('PERFIL') || name.includes('PERFIL');
-    } else if (selectedType === 'accesorios') {
-      matchesType =
-        cat.includes('ACCESORIO') ||
-        cat.includes('CANALETA') ||
-        name.includes('TORNILL') ||
-        name.includes('GOLILLA');
-    } else if (selectedType === 'rollos') {
-      matchesType = cat.includes('ROLLO') || name.includes('ROLLO');
-    } else if (selectedType === 'pinturas') {
-      matchesType =
-        cat.includes('PINTUR') ||
-        cat.includes('ADHESIV') ||
-        name.includes('PINTUR') ||
-        name.includes('SILICONA');
-    } else if (selectedType === 'bajo_stock') {
-      matchesType = isLowStock(p);
-    } else if (selectedType === 'faltantes') {
-      matchesType = (Number(p.quantity) || 0) < 0;
-    } else if (selectedType === 'sin_stock') {
-      matchesType = (Number(p.quantity) || 0) === 0;
-    } else if (selectedType === 'ignorados') {
-      matchesType = isProductIgnoredFromStock(p);
-    } else if (selectedType !== 'all') {
-      matchesType = cat === selectedType;
+    const pColor = detectProductColor(p);
+    const matchesColor =
+      selectedColor === 'all' || pColor === selectedColor;
+
+    let matchesStock = true;
+    if (selectedStockStatus === 'bajo_stock') {
+      matchesStock = isLowStock(p) && !isProductIgnoredFromStock(p);
+    } else if (selectedStockStatus === 'ignorados') {
+      matchesStock = isProductIgnoredFromStock(p);
     }
 
-    return matchesSearch && matchesCategory && matchesType;
+    return matchesSearch && matchesMainType && matchesCategory && matchesColor && matchesStock;
   });
 
   // Agrupación por categoría para vista agrupada
@@ -282,8 +280,21 @@ export default function InventarioPage() {
           </div>
 
           {/* Nombre Producto */}
-          <h6 className="card-title fw-bold text-light mb-3" style={{ fontSize: '15px', lineHeight: 1.35, wordBreak: 'break-word' }}>
-            {product.name}
+          <h6 className="card-title fw-bold text-light mb-3 d-flex align-items-center justify-content-between flex-wrap gap-1" style={{ fontSize: '15px', lineHeight: 1.35, wordBreak: 'break-word' }}>
+            <span>{product.name}</span>
+            {(() => {
+              const col = detectProductColor(product);
+              if (col === 'clear') {
+                return <span className="badge" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff', fontSize: '11px', border: '1px solid rgba(0, 212, 255, 0.3)' }}><i className="bi bi-droplet-half me-1"></i>Clear</span>;
+              }
+              if (col === 'opal') {
+                return <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#f8fafc', fontSize: '11px', border: '1px solid rgba(255, 255, 255, 0.3)' }}><i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Opal</span>;
+              }
+              if (col === 'bronce') {
+                return <span className="badge" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', fontSize: '11px', border: '1px solid rgba(217, 119, 6, 0.4)' }}><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
+              }
+              return null;
+            })()}
           </h6>
 
           {/* Fila Stock Actual + Stepper Táctil */}
@@ -319,7 +330,8 @@ export default function InventarioPage() {
                   </span>
                 ) : isLow ? (
                   <span className="badge bg-warning text-dark px-2 py-1 fw-bold" style={{ fontSize: '10px' }}>
-                    ⚠️ Bajo stock (&lt;{threshold} uds)
+                    <i className="bi bi-exclamation-triangle-fill me-1"></i>
+                    Bajo stock (&lt;{threshold} uds)
                   </span>
                 ) : isIgnored ? (
                   <span className="badge bg-secondary text-light px-2 py-1" style={{ fontSize: '10px', opacity: 0.8 }} title="Ignorado de alertas de stock">
@@ -556,7 +568,7 @@ export default function InventarioPage() {
 
       await sendNotification(
         'eliminado',
-        `⚠️ ${currentUser?.displayName || currentUser?.email || 'Usuario'} eliminó ${product.sku} (${product.name})`,
+        `${currentUser?.displayName || currentUser?.email || 'Usuario'} eliminó ${product.sku} (${product.name})`,
         currentUser
       );
     } catch (error) {
@@ -971,7 +983,7 @@ export default function InventarioPage() {
 
       await sendNotification(
         'info',
-        `📥 ${currentUser.displayName || currentUser.email} importó ${normalized.length} productos desde Excel (${inserted} creados, ${updated} actualizados${sumMsg})`,
+        `${currentUser.displayName || currentUser.email} importó ${normalized.length} productos desde Excel (${inserted} creados, ${updated} actualizados${sumMsg})`,
         currentUser
       );
 
@@ -1035,7 +1047,7 @@ export default function InventarioPage() {
                 onClick={() => setSearch('')}
                 aria-label="Limpiar búsqueda"
               >
-                ✕
+                <i className="bi bi-x-lg"></i>
               </button>
             )}
           </div>
@@ -1106,6 +1118,16 @@ export default function InventarioPage() {
             <span>Importar Excel</span>
           </button>
 
+          <Link
+            href="/conteo"
+            className="btn btn-sm btn-outline-info text-info flex-fill flex-xl-grow-0 d-flex align-items-center justify-content-center gap-1"
+            style={{ minHeight: '42px', textDecoration: 'none' }}
+            title="Ir al modo de Conteo Físico independiente (Auditoría de Bodega)"
+          >
+            <i className="bi bi-clipboard2-check"></i>
+            <span>Conteo Físico</span>
+          </Link>
+
           <button
             type="button"
             className="btn btn-sm btn-outline-secondary text-light flex-fill flex-xl-grow-0 d-flex align-items-center justify-content-center gap-1"
@@ -1130,75 +1152,280 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* Barra de Filtro por Tipo */}
+      {/* Barra de Filtro Principal: Familia de Productos y Stock */}
       <div className="card mb-3 p-2 border-secondary" style={{ background: 'rgba(255, 255, 255, 0.03)' }}>
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
-          <div className="d-flex align-items-center gap-2 flex-grow-1" style={{ minWidth: '240px' }}>
-            <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
-              <i className="bi bi-funnel-fill text-info"></i> Filtro por Tipo:
+          {/* Selector de Familia */}
+          <div className="d-flex align-items-center gap-1 flex-wrap">
+            <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1 me-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+              <i className="bi bi-funnel-fill text-info"></i> Familia:
             </span>
-            <select
-              className="form-select form-select-sm bg-dark border-secondary text-light fw-semibold"
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value)}
-              style={{ minHeight: '38px', fontSize: '13px' }}
+
+            {/* Todos */}
+            <button
+              type="button"
+              className={`btn btn-sm ${selectedMainType === 'all' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+              onClick={() => {
+                setSelectedMainType('all');
+                setSelectedCategory('all');
+                setSelectedColor('all');
+              }}
+              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
             >
-              <option value="all">📦 Todos los Tipos ({typeCounts.all})</option>
-              <option value="planchas">🔹 Planchas (Onduladas, Greca, Alveolar, Compacto) ({typeCounts.planchas})</option>
-              <option value="perfiles">🔸 Perfiles (H, A, AF, Clip Plano) ({typeCounts.perfiles})</option>
-              <option value="accesorios">🔧 Accesorios y Canaletas ({typeCounts.accesorios})</option>
-              <option value="rollos">🌀 Rollos ({typeCounts.rollos})</option>
-              <option value="pinturas">🎨 Pinturas y Adhesivos</option>
-              <option value="bajo_stock">⚠️ Stock Bajo ({typeCounts.bajo_stock})</option>
-              <option value="faltantes">🚫 Faltantes / Negativos ({typeCounts.faltantes})</option>
-              <option value="sin_stock">0️⃣ Sin Stock ({typeCounts.sin_stock})</option>
-              <option value="ignorados">⚪ Ignorados de Stock (8.70, Clear 0.81x1, Pinturas) ({typeCounts.ignorados})</option>
-              <option disabled>────────── Por Categoría Específica ──────────</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c} ({categoryCounts[c] || 0})
-                </option>
-              ))}
-            </select>
+              <i className="bi bi-grid me-1"></i>
+              Todos ({mainTypeCounts.all})
+            </button>
+
+            {/* Planchas */}
+            <button
+              type="button"
+              className={`btn btn-sm ${selectedMainType === 'planchas' ? 'btn-primary text-white fw-bold shadow' : 'btn-outline-primary text-light'}`}
+              onClick={() => {
+                setSelectedMainType('planchas');
+                setSelectedCategory('all');
+                setSelectedColor('all');
+              }}
+              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 12px', borderColor: selectedMainType === 'planchas' ? '#3b82f6' : 'rgba(59, 130, 246, 0.5)' }}
+            >
+              <i className="bi bi-layers me-1"></i>
+              Planchas ({mainTypeCounts.planchas})
+            </button>
+
+            {/* Perfiles */}
+            <button
+              type="button"
+              className={`btn btn-sm ${selectedMainType === 'perfiles' ? 'btn-warning text-dark fw-bold shadow' : 'btn-outline-secondary text-light'}`}
+              onClick={() => {
+                setSelectedMainType('perfiles');
+                setSelectedCategory('all');
+                setSelectedColor('all');
+              }}
+              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
+            >
+              <i className="bi bi-rulers me-1"></i>
+              Perfiles ({mainTypeCounts.perfiles})
+            </button>
+
+            {/* Accesorios */}
+            <button
+              type="button"
+              className={`btn btn-sm ${selectedMainType === 'accesorios' ? 'btn-light text-dark fw-bold shadow' : 'btn-outline-secondary text-light'}`}
+              onClick={() => {
+                setSelectedMainType('accesorios');
+                setSelectedCategory('all');
+                setSelectedColor('all');
+              }}
+              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
+            >
+              <i className="bi bi-wrench me-1"></i>
+              Accesorios ({mainTypeCounts.accesorios})
+            </button>
+
+            {/* Pinturas y Adhesivos */}
+            <button
+              type="button"
+              className={`btn btn-sm ${selectedMainType === 'pinturas' ? 'text-light fw-bold shadow' : 'btn-outline-secondary text-light'}`}
+              onClick={() => {
+                setSelectedMainType('pinturas');
+                setSelectedCategory('all');
+                setSelectedColor('all');
+              }}
+              style={{
+                minHeight: '34px',
+                fontSize: '12px',
+                padding: '4px 10px',
+                background: selectedMainType === 'pinturas' ? '#d946ef' : 'transparent',
+                borderColor: selectedMainType === 'pinturas' ? '#d946ef' : '',
+              }}
+            >
+              <i className="bi bi-paint-bucket me-1"></i>
+              Pinturas ({mainTypeCounts.pinturas})
+            </button>
           </div>
 
-          {/* Quick Filter Buttons en Tablet & Móvil */}
+          {/* Filtro por Estado de Stock y Limpiar */}
           <div className="d-flex align-items-center gap-1 flex-wrap">
-            {[
-              { id: 'all', label: 'Todos', icon: 'bi-grid' },
-              { id: 'planchas', label: 'Planchas', icon: 'bi-layers' },
-              { id: 'perfiles', label: 'Perfiles', icon: 'bi-rulers' },
-              { id: 'accesorios', label: 'Accesorios', icon: 'bi-wrench' },
-              { id: 'bajo_stock', label: `Bajo (${typeCounts.bajo_stock})`, icon: 'bi-exclamation-triangle', isWarning: true },
-              { id: 'ignorados', label: `Ignorados (${typeCounts.ignorados})`, icon: 'bi-eye-slash' },
-            ].map((btn) => (
+            <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1 me-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+              <i className="bi bi-speedometer2 text-secondary"></i> Stock:
+            </span>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${selectedStockStatus === 'bajo_stock' ? 'btn-warning text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+              onClick={() => setSelectedStockStatus(selectedStockStatus === 'bajo_stock' ? 'all' : 'bajo_stock')}
+              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
+              title="Filtrar solo productos con stock bajo"
+            >
+              <i className="bi bi-exclamation-triangle-fill me-1 text-warning"></i>
+              Bajo ({stockCounts.bajo_stock})
+            </button>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${selectedStockStatus === 'ignorados' ? 'btn-secondary text-light fw-bold' : 'btn-outline-secondary text-light'}`}
+              onClick={() => setSelectedStockStatus(selectedStockStatus === 'ignorados' ? 'all' : 'ignorados')}
+              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
+              title="Filtrar solo productos ignorados de alertas de stock"
+            >
+              <i className="bi bi-eye-slash me-1"></i>
+              Ignorados ({stockCounts.ignorados})
+            </button>
+
+            {(selectedMainType !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all' || selectedCategory !== 'all') && (
               <button
-                key={btn.id}
                 type="button"
-                className={`btn btn-sm ${selectedType === btn.id ? (btn.isWarning ? 'btn-warning text-dark fw-bold' : 'btn-info text-dark fw-bold') : 'btn-outline-secondary text-light'}`}
-                onClick={() => setSelectedType(btn.id)}
-                style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
+                className="btn btn-sm btn-link text-info text-decoration-none fw-semibold d-inline-flex align-items-center gap-1"
+                onClick={() => {
+                  setSelectedMainType('all');
+                  setSelectedColor('all');
+                  setSelectedStockStatus('all');
+                  setSelectedCategory('all');
+                }}
+                style={{ fontSize: '12px', padding: '4px 8px' }}
               >
-                <i className={`bi ${btn.icon} me-1`}></i>
-                {btn.label}
-              </button>
-            ))}
-            {selectedType !== 'all' && (
-              <button
-                type="button"
-                className="btn btn-sm btn-link text-secondary text-decoration-none"
-                onClick={() => setSelectedType('all')}
-                style={{ fontSize: '11px', padding: '4px 6px' }}
-              >
-                ✕ Limpiar
+                <i className="bi bi-x-circle"></i> Limpiar filtros
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Selector / Chips de Categorías */}
-      {categories.length > 0 && (
+      {/* Sub-barra de Planchas: Tono (Clear, Opal, Bronce) y Modelos */}
+      {selectedMainType === 'planchas' && (
+        <div className="card mb-3 p-3 border-info shadow-sm" style={{ background: 'rgba(0, 212, 255, 0.04)', borderColor: 'rgba(0, 212, 255, 0.3)' }}>
+          <div className="d-flex flex-column gap-2">
+            {/* Fila 1: Tono de Plancha (Clear, Opal, Bronce) */}
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 pb-2 border-bottom border-secondary border-opacity-25">
+              <div className="d-flex align-items-center gap-2 flex-wrap">
+                <span className="text-info small fw-bold text-uppercase d-flex align-items-center gap-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+                  <i className="bi bi-palette2"></i> Tono de Plancha:
+                </span>
+
+                {/* Todas las Planchas */}
+                <button
+                  type="button"
+                  className={`btn btn-sm ${selectedColor === 'all' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                  onClick={() => setSelectedColor('all')}
+                  style={{ minHeight: '32px', fontSize: '12px', padding: '3px 12px' }}
+                >
+                  <i className="bi bi-grid me-1"></i>
+                  Todas ({planchaColorCounts.all})
+                </button>
+
+                {/* Solo Clear */}
+                <button
+                  type="button"
+                  className="btn btn-sm fw-bold"
+                  onClick={() => setSelectedColor(selectedColor === 'clear' ? 'all' : 'clear')}
+                  style={{
+                    minHeight: '32px',
+                    fontSize: '12px',
+                    padding: '3px 12px',
+                    background: selectedColor === 'clear' ? '#00d4ff' : 'rgba(0, 212, 255, 0.08)',
+                    color: selectedColor === 'clear' ? '#0a0e17' : '#00d4ff',
+                    borderColor: '#00d4ff',
+                    borderWidth: '1px',
+                    borderStyle: 'solid',
+                    boxShadow: selectedColor === 'clear' ? '0 0 10px rgba(0, 212, 255, 0.4)' : 'none',
+                  }}
+                  title="Filtrar solo planchas Clear (Transparentes)"
+                >
+                  <i className="bi bi-droplet-half me-1"></i>
+                  Solo Clear ({planchaColorCounts.clear})
+                </button>
+
+                {/* Solo Opal */}
+                <button
+                  type="button"
+                  className="btn btn-sm fw-bold"
+                  onClick={() => setSelectedColor(selectedColor === 'opal' ? 'all' : 'opal')}
+                  style={{
+                    minHeight: '32px',
+                    fontSize: '12px',
+                    padding: '3px 12px',
+                    background: selectedColor === 'opal' ? '#f8fafc' : 'rgba(255, 255, 255, 0.08)',
+                    color: selectedColor === 'opal' ? '#0f172a' : '#f8fafc',
+                    borderColor: 'rgba(255, 255, 255, 0.6)',
+                    borderWidth: '1px',
+                    borderStyle: 'solid',
+                    boxShadow: selectedColor === 'opal' ? '0 0 10px rgba(255, 255, 255, 0.3)' : 'none',
+                  }}
+                  title="Filtrar solo planchas Opal"
+                >
+                  <i className="bi bi-circle-fill me-1" style={{ fontSize: '9px' }}></i>
+                  Solo Opal ({planchaColorCounts.opal})
+                </button>
+
+                {/* Solo Bronce */}
+                <button
+                  type="button"
+                  className="btn btn-sm fw-bold"
+                  onClick={() => setSelectedColor(selectedColor === 'bronce' ? 'all' : 'bronce')}
+                  style={{
+                    minHeight: '32px',
+                    fontSize: '12px',
+                    padding: '3px 12px',
+                    background: selectedColor === 'bronce' ? '#d97706' : 'rgba(217, 119, 6, 0.12)',
+                    color: selectedColor === 'bronce' ? '#ffffff' : '#fbbf24',
+                    borderColor: '#d97706',
+                    borderWidth: '1px',
+                    borderStyle: 'solid',
+                    boxShadow: selectedColor === 'bronce' ? '0 0 10px rgba(217, 119, 6, 0.4)' : 'none',
+                  }}
+                  title="Filtrar solo planchas Bronce"
+                >
+                  <i className="bi bi-sun-fill me-1"></i>
+                  Solo Bronce ({planchaColorCounts.bronce})
+                </button>
+              </div>
+
+              {selectedColor !== 'all' && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-link text-info text-decoration-none small p-0 d-inline-flex align-items-center gap-1"
+                  onClick={() => setSelectedColor('all')}
+                  style={{ fontSize: '11px' }}
+                >
+                  <i className="bi bi-x-circle"></i> Ver todos los tonos
+                </button>
+              )}
+            </div>
+
+            {/* Fila 2: Sub-categorías / Modelos de Planchas */}
+            <div className="d-flex align-items-center gap-1 flex-wrap pt-1">
+              <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1 me-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+                <i className="bi bi-tag text-secondary"></i> Modelo:
+              </span>
+              <button
+                type="button"
+                className={`btn btn-sm ${selectedCategory === 'all' ? 'btn-outline-info text-info fw-bold' : 'btn-outline-secondary text-secondary'}`}
+                onClick={() => setSelectedCategory('all')}
+                style={{ minHeight: '28px', fontSize: '11px', padding: '2px 8px' }}
+              >
+                Todos los modelos ({planchaProducts.length})
+              </button>
+              {planchaCategories.map((cat) => {
+                const count = planchaProducts.filter((p) => (p.category || 'SIN CATEGORÍA').toUpperCase() === cat).length;
+                const isActive = selectedCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    className={`btn btn-sm ${isActive ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                    onClick={() => setSelectedCategory(isActive ? 'all' : cat)}
+                    style={{ minHeight: '28px', fontSize: '11px', padding: '2px 8px' }}
+                  >
+                    {cat} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Selector / Chips de Categorías (solo cuando se está en 'Todos') */}
+      {selectedMainType === 'all' && categories.length > 0 && (
         <div className="category-chips-wrapper">
           <div className="category-chips">
             <button
@@ -1242,14 +1469,29 @@ export default function InventarioPage() {
               <i className="bi bi-box-seam"></i>
             </div>
             <div className="empty-state-title">
-              {search || selectedCategory !== 'all' ? 'Sin resultados' : 'Inventario vacío'}
+              {search || selectedMainType !== 'all' || selectedCategory !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all' ? 'Sin resultados' : 'Inventario vacío'}
             </div>
             <div className="empty-state-text">
-              {search || selectedCategory !== 'all'
+              {search || selectedMainType !== 'all' || selectedCategory !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all'
                 ? 'No se encontraron productos con los filtros aplicados'
                 : 'Agrega productos manualmente o importa tu archivo Excel con un clic'
               }
             </div>
+            {(search || selectedMainType !== 'all' || selectedCategory !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all') && (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-info mt-2"
+                onClick={() => {
+                  setSearch('');
+                  setSelectedMainType('all');
+                  setSelectedCategory('all');
+                  setSelectedColor('all');
+                  setSelectedStockStatus('all');
+                }}
+              >
+                Limpiar todos los filtros
+              </button>
+            )}
             {!search && selectedCategory === 'all' && (
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
                 <button className="btn btn-primary" onClick={openAddModal} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -1314,7 +1556,22 @@ export default function InventarioPage() {
                                 {product.sku}
                               </code>
                             </td>
-                            <td>{product.name}</td>
+                            <td>
+                              <span>{product.name}</span>
+                              {(() => {
+                                const col = detectProductColor(product);
+                                if (col === 'clear') {
+                                  return <span className="badge ms-2" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff', fontSize: '11px', border: '1px solid rgba(0, 212, 255, 0.3)' }}><i className="bi bi-droplet-half me-1"></i>Clear</span>;
+                                }
+                                if (col === 'opal') {
+                                  return <span className="badge ms-2" style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#f8fafc', fontSize: '11px', border: '1px solid rgba(255, 255, 255, 0.3)' }}><i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Opal</span>;
+                                }
+                                if (col === 'bronce') {
+                                  return <span className="badge ms-2" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', fontSize: '11px', border: '1px solid rgba(217, 119, 6, 0.4)' }}><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
+                                }
+                                return null;
+                              })()}
+                            </td>
                             <td>
                               {(() => {
                                 const qty = Number(product.quantity) || 0;
@@ -1399,17 +1656,17 @@ export default function InventarioPage() {
                               {canEdit ? (
                                 <div style={{ display: 'flex', gap: '8px' }}>
                                   <button
-                                    className="btn btn-secondary btn-sm"
+                                    className="btn btn-secondary btn-sm d-inline-flex align-items-center gap-1"
                                     onClick={() => openEditModal(product)}
                                   >
-                                    ✏️ Editar
+                                    <i className="bi bi-pencil-square"></i> Editar
                                   </button>
                                   <button
-                                    className="btn btn-danger btn-sm"
+                                    className="btn btn-danger btn-sm d-inline-flex align-items-center justify-content-center"
                                     onClick={() => handleDelete(product)}
                                     title="Eliminar producto"
                                   >
-                                    🗑️
+                                    <i className="bi bi-trash3"></i>
                                   </button>
                                 </div>
                               ) : (
@@ -1469,7 +1726,22 @@ export default function InventarioPage() {
                           {product.sku}
                         </code>
                       </td>
-                      <td>{product.name}</td>
+                      <td>
+                        <span>{product.name}</span>
+                        {(() => {
+                          const col = detectProductColor(product);
+                          if (col === 'clear') {
+                            return <span className="badge ms-2" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff', fontSize: '11px', border: '1px solid rgba(0, 212, 255, 0.3)' }}><i className="bi bi-droplet-half me-1"></i>Clear</span>;
+                          }
+                          if (col === 'opal') {
+                            return <span className="badge ms-2" style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#f8fafc', fontSize: '11px', border: '1px solid rgba(255, 255, 255, 0.3)' }}><i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Opal</span>;
+                          }
+                          if (col === 'bronce') {
+                            return <span className="badge ms-2" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', fontSize: '11px', border: '1px solid rgba(217, 119, 6, 0.4)' }}><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
+                          }
+                          return null;
+                        })()}
+                      </td>
                       <td>
                         <span
                           className="category-badge"
@@ -1567,17 +1839,17 @@ export default function InventarioPage() {
                         {canEdit ? (
                           <div style={{ display: 'flex', gap: '8px' }}>
                             <button
-                              className="btn btn-secondary btn-sm"
+                              className="btn btn-secondary btn-sm d-inline-flex align-items-center gap-1"
                               onClick={() => openEditModal(product)}
                             >
-                              ✏️ Editar
+                              <i className="bi bi-pencil-square"></i> Editar
                             </button>
                             <button
-                              className="btn btn-danger btn-sm"
+                              className="btn btn-danger btn-sm d-inline-flex align-items-center justify-content-center"
                               onClick={() => handleDelete(product)}
                               title="Eliminar producto"
                             >
-                              🗑️
+                              <i className="bi bi-trash3"></i>
                             </button>
                           </div>
                         ) : (
@@ -1613,7 +1885,7 @@ export default function InventarioPage() {
                 {editProduct ? 'Editar Producto' : 'Nuevo Producto'}
               </h2>
               <button className="modal-close" onClick={() => setShowModal(false)}>
-                ✕
+                <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <form onSubmit={handleSave}>
@@ -1714,11 +1986,11 @@ export default function InventarioPage() {
                           {quantityToAdd && (
                             <button
                               type="button"
-                              className="btn btn-link btn-sm text-secondary p-0 text-decoration-none"
+                              className="btn btn-link btn-sm text-secondary p-0 text-decoration-none d-inline-flex align-items-center gap-1"
                               onClick={() => setQuantityToAdd('')}
                               style={{ fontSize: '12px' }}
                             >
-                              ✕ Limpiar
+                              <i className="bi bi-x-circle"></i> Limpiar
                             </button>
                           )}
                         </div>
@@ -1894,7 +2166,10 @@ export default function InventarioPage() {
           <div className="modal modal-lg" onClick={(e) => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
               <div>
-                <h2 className="modal-title">📤 Importar Inventario desde Excel</h2>
+                <h2 className="modal-title d-flex align-items-center gap-2">
+                  <i className="bi bi-file-earmark-arrow-up text-primary"></i>
+                  <span>Importar Inventario desde Excel</span>
+                </h2>
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                   Carga masiva de productos mediante archivo .xlsx, .xls o .csv con detección de categorías
                 </p>
@@ -1904,7 +2179,7 @@ export default function InventarioPage() {
                 onClick={() => !importing && setShowImportModal(false)}
                 disabled={importing}
               >
-                ✕
+                <i className="bi bi-x-lg"></i>
               </button>
             </div>
 
@@ -1918,8 +2193,12 @@ export default function InventarioPage() {
                   borderRadius: 'var(--radius-md)',
                   fontSize: '13px',
                   marginBottom: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
                 }}>
-                  ⚠️ {importError}
+                  <i className="bi bi-exclamation-octagon-fill"></i>
+                  <span>{importError}</span>
                 </div>
               )}
 
@@ -1932,8 +2211,12 @@ export default function InventarioPage() {
                   borderRadius: 'var(--radius-md)',
                   fontSize: '13px',
                   marginBottom: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
                 }}>
-                  ✅ {importSuccess}
+                  <i className="bi bi-check-circle-fill"></i>
+                  <span>{importSuccess}</span>
                 </div>
               )}
 
@@ -1962,7 +2245,9 @@ export default function InventarioPage() {
                     style={{ display: 'none' }}
                     onChange={(e) => handleFileChange(e.target.files[0])}
                   />
-                  <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>📊</div>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '12px', color: 'var(--accent-primary)' }}>
+                    <i className="bi bi-file-earmark-spreadsheet"></i>
+                  </div>
                   <div style={{ fontWeight: 600, fontSize: '16px', marginBottom: '6px' }}>
                     Arrastra tu archivo Excel aquí o haz clic para seleccionarlo
                   </div>
@@ -1984,7 +2269,10 @@ export default function InventarioPage() {
                     marginBottom: '16px',
                   }}>
                     <div>
-                      <span style={{ fontWeight: 600 }}>📄 {importFile?.name}</span>
+                      <span style={{ fontWeight: 600 }}>
+                        <i className="bi bi-file-earmark-excel text-success me-1"></i>
+                        {importFile?.name}
+                      </span>
                       <span style={{ color: 'var(--text-muted)', fontSize: '13px', marginLeft: '12px' }}>
                         ({importRawData.length} filas detectadas)
                       </span>
@@ -2011,8 +2299,9 @@ export default function InventarioPage() {
                     padding: '16px',
                     marginBottom: '16px',
                   }}>
-                    <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '14px' }}>
-                      ⚙️ Asignación de Columnas del Excel:
+                    <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <i className="bi bi-gear-fill text-secondary"></i>
+                      <span>Asignación de Columnas del Excel:</span>
                     </div>
                     <div className="row g-2">
                       <div className="col-12 col-sm-6 col-lg-3">
@@ -2087,7 +2376,7 @@ export default function InventarioPage() {
                           fontSize: '13px',
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                            <span style={{ fontSize: '1.2rem' }}>🔄</span>
+                            <i className="bi bi-arrow-repeat text-warning fs-5"></i>
                             <strong style={{ color: '#a78bfa' }}>
                               {preview.duplicatesFound} SKU(s) duplicados detectados — se consolidarán automáticamente
                             </strong>
@@ -2130,8 +2419,9 @@ export default function InventarioPage() {
                     padding: '16px',
                     marginBottom: '16px',
                   }}>
-                    <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px' }}>
-                      📋 Modo de Importación:
+                    <div style={{ fontWeight: 600, marginBottom: '10px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <i className="bi bi-card-checklist text-info"></i>
+                      <span>Modo de Importación:</span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '13px' }}>
@@ -2158,7 +2448,10 @@ export default function InventarioPage() {
                           style={{ marginTop: '3px' }}
                         />
                         <span>
-                          <strong style={{ color: 'var(--success)' }}>➕ Sumar cantidades al stock existente</strong>: Si el SKU ya existe, <u>suma</u> la cantidad del Excel al stock actual (ej: tenés 3 + importás 5 = 8). Si no existe, lo crea.
+                          <strong style={{ color: 'var(--success)' }}>
+                            <i className="bi bi-plus-circle text-success me-1"></i>
+                            Sumar cantidades al stock existente
+                          </strong>: Si el SKU ya existe, <u>suma</u> la cantidad del Excel al stock actual (ej: tenés 3 + importás 5 = 8). Si no existe, lo crea.
                         </span>
                       </label>
 
@@ -2305,7 +2598,7 @@ export default function InventarioPage() {
                 disabled={npSubmitting}
                 aria-label="Cerrar modal"
               >
-                ✕
+                <i className="bi bi-x-lg"></i>
               </button>
             </div>
 
@@ -2414,7 +2707,7 @@ export default function InventarioPage() {
                           className="btn btn-outline-secondary text-light"
                           onClick={() => setNpSearch('')}
                         >
-                          ✕
+                          <i className="bi bi-x-lg"></i>
                         </button>
                       )}
                     </div>
@@ -2474,8 +2767,8 @@ export default function InventarioPage() {
                                 </div>
                                 <div>
                                   {alreadyAdded ? (
-                                    <span className="badge bg-secondary text-light px-2 py-1" style={{ fontSize: '11px' }}>
-                                      ✓ En lista
+                                    <span className="badge bg-secondary text-light px-2 py-1 d-inline-flex align-items-center gap-1" style={{ fontSize: '11px' }}>
+                                      <i className="bi bi-check2"></i> En lista
                                     </span>
                                   ) : (
                                     <button

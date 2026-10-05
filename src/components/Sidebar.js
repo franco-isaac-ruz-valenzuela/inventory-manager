@@ -8,6 +8,7 @@ const navItems = [
   { label: 'Navegación', type: 'section' },
   { href: '/', icon: 'bi bi-grid-1x2', label: 'Dashboard' },
   { href: '/inventario', icon: 'bi bi-box-seam', label: 'Inventario' },
+  { href: '/conteo', icon: 'bi bi-clipboard2-check', label: 'Conteo Físico' },
   { href: '/comparar', icon: 'bi bi-file-earmark-diff', label: 'Comparar Excel' },
   { href: '/escaner', icon: 'bi bi-camera', label: 'Escáner' },
   { label: 'Registros', type: 'section' },
@@ -48,7 +49,7 @@ export default function Sidebar({ isOpen, onClose }) {
             onClick={onClose}
             aria-label="Cerrar menú"
           >
-            ✕
+            <i className="bi bi-x-lg"></i>
           </button>
         </div>
 
