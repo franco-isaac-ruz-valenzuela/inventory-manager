@@ -9,6 +9,8 @@ no se inventan versiones retroactivas.
   recuperación, pruebas y planificación de privacidad/expansión.
 - Límites y funciones pendientes; plantilla para próximos cambios.
 - Cambio documental: no altera stock, permisos ni comportamiento.
+- Documentación generalizada por roles y bodega, sin nombres de usuarios,
+  identidades concretas ni ubicación de la instalación.
 
 ## 2026-10-12 — Filtros contraíbles (`8fffc65`)
 
@@ -21,19 +23,19 @@ no se inventan versiones retroactivas.
 - Transacciones para stock, auditoría, recibos de nota y conciliaciones.
 - Rechazo de duplicados y cantidades absolutas desactualizadas; copia de bajas.
 - Validación de cantidades/planillas e importaciones atómicas con límites.
-- Editores por UID; consultas autorizadas y administración por Franco.
+- Editores por UID; consultas autorizadas y administración de accesos por el administrador.
 - Conteo conserva entradas pendientes y ordena guardados.
 - Historial paginado, filtros por familia/medida/color e interfaz sobria.
 - Salidas de build/dev separadas localmente y salida estándar en Vercel.
 - Dependencias actualizadas y cabeceras de seguridad.
 - Evidencia de esa revisión: 3 pruebas de validación y 12 de seguridad aprobadas,
   compilación correcta y auditoría de dependencias sin avisos conocidos entonces.
-- Reglas publicadas en `leker-inventario`; código publicado por GitHub/Vercel.
+- Reglas publicadas en el proyecto productivo; código publicado por GitHub/Vercel.
 - El usuario confirmó que el conteo funciona en su uso real.
 
 ## Antecedentes
 
-- `6aca462`: identificación visible de M. Silva como Jefe de Bodega.
+- `6aca462`: identificación visible del perfil de encargado de bodega.
 - `f2d0ff4`: botones de edición móvil.
 - `f366faf`: sincronización y persistencia anterior del conteo.
 

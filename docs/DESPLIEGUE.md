@@ -37,8 +37,8 @@ valores de respaldo de otro proyecto. API key y project ID son obligatorios.
 | Vercel | Integración de `main`; `.next` cuando `VERCEL=1` |
 
 Localhost usa la base indicada en `.env.local`: no significa datos aislados.
-Usar un proyecto separado para pruebas de escritura. Producción confirmada:
-`leker-inventario`. Las pruebas del emulador no usan ese proyecto.
+Usar un proyecto separado para pruebas de escritura. Confirmar el identificador
+productivo en la configuración de Firebase. Las pruebas del emulador no usan ese proyecto.
 
 ## Publicar
 
@@ -61,7 +61,7 @@ git push origin main
 ```powershell
 .\node_modules\.bin\firebase.cmd login
 .\node_modules\.bin\firebase.cmd projects:list
-.\node_modules\.bin\firebase.cmd deploy --only firestore:rules --project leker-inventario
+.\node_modules\.bin\firebase.cmd deploy --only firestore:rules --project ID_REAL_DEL_PROYECTO
 ```
 
 7. Comprobar login, permisos, rutas, CSS/JS y flujos afectados.

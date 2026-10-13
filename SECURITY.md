@@ -6,11 +6,12 @@ en Firebase hasta ejecutar el despliegue.
 
 ## Acceso
 
-- M. Silva: UID `M5qscStYVWcZsm1gSFF2sMmN3Ek1`, correo `msilva@leker.cl`.
-- Franco: UID `TadrO5T20Ka4g1vRUfDZBeNl5q22`, correo `franco.ruz.valenzuela@gmail.com`.
+- Los editores se autorizan mediante UID exactos definidos en el código y las reglas.
+- El administrador dispone de edición y gestión de accesos. Su UID también se
+  define explícitamente; los nombres y correos parecidos no conceden permisos.
 - Las demás cuentas deben tener un documento `authorized_users/{UID}` con
   `enabled: true`, creado desde Firebase Console o un entorno Admin confiable.
-  Estas cuentas pueden consultar y registrar conteos individuales. Franco puede
+  Estas cuentas pueden consultar y registrar conteos individuales. El administrador puede
   autorizar y revocar consultas desde `/usuarios`; cada cambio exige una auditoría
   en la misma transacción. Los usuarios de consulta no pueden concederse permisos.
 - Antes de publicar, registrar los UID de los usuarios de consulta que deben
@@ -64,7 +65,7 @@ desactualizadas y permite reintentar después de revisar los valores vigentes.
 
 ## Respaldos pendientes
 
-El 12 de octubre de 2026 se confirmó que `leker-inventario` tiene la facturación
+El 12 de octubre de 2026 se confirmó que el proyecto revisado tiene la facturación
 desactivada y no tiene respaldos nativos programados. No se activó facturación.
 Firebase requiere facturación para sus respaldos nativos. Está pendiente elegir
 entre respaldo local (depende del PC y la sesión) y respaldo nativo con costo.

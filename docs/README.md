@@ -18,7 +18,7 @@ como pendientes. No constituyen una certificación legal.
 
 ## Alcance
 
-Control interno de materiales de Puerto Montt: un inventario y una sesión de
+Control interno de materiales de una bodega: un inventario y una sesión de
 conteo compartidos. No emite documentos tributarios ni reemplaza la contabilidad.
 Las notas de pedido son referencias operativas. No hay aislamiento por sucursal.
 

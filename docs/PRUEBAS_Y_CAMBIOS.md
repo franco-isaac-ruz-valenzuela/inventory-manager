@@ -14,9 +14,9 @@ normalización/consolidación Excel. Doce pruebas en `tests/security.test.mjs`
 usan las reglas reales y helpers de producción dentro del emulador:
 
 - Conteo 563, rechazo de valor antiguo e incrementos simultáneos.
-- Alta/revocación por Franco con auditoría atómica.
+- Alta/revocación por el administrador con auditoría atómica.
 - Rechazo de anónimos, identidades incorrectas y stock sin evidencia.
-- UID de Franco independiente del proveedor del token.
+- UID del administrador independiente del proveedor del token.
 - Dos descuentos: 10 pasa a 8 con registros inmutables.
 - Rechazo de stock absoluto antiguo y reversión si falla auditoría.
 - Notas aplicadas una sola vez; cancelación por producto ausente.

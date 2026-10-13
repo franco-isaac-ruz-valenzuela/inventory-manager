@@ -42,7 +42,7 @@ El modelo actual no separa sucursales. Antes de ampliar:
 3. Asignar roles/bodegas y protegerlos en reglas.
 4. Diseñar traslados con salida, recepción y prevención de duplicados.
 5. Habilitar vista nacional para responsables autorizados.
-6. Migrar Puerto Montt preservando referencias/historial.
+6. Migrar la bodega inicial preservando referencias/historial.
 7. Validar dos bodegas, concurrencia, consumo y restauración antes de extender.
 
 Agregar ciudades a categorías no aislaría stock ni permisos. Estas funciones

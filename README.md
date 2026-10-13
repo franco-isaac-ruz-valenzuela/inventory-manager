@@ -24,7 +24,7 @@ administración, arquitectura y datos, despliegue, operación y recuperación,
 pruebas, privacidad y ampliación nacional. Consultar también el
 [registro de cambios](CHANGELOG.md) y [seguridad](SECURITY.md).
 
-El alcance actual es el control interno de materiales de Puerto Montt: no emite
+El alcance actual es el control interno de materiales de una bodega: no emite
 documentos tributarios ni reemplaza la contabilidad. No hay separación por bodega
 ni respaldos automáticos configurados. Los límites operativos están documentados.
 
@@ -73,7 +73,7 @@ Sigue estos sencillos pasos para ejecutar el proyecto en tu entorno local:
 
 ### 1. Clonar el repositorio
 ```bash
-git clone https://github.com/franco-isaac-ruz-valenzuela/inventory-manager.git
+git clone URL_DEL_REPOSITORIO
 cd inventory-manager
 ```
 
@@ -130,5 +130,5 @@ Este proyecto está bajo la Licencia **MIT** — consulta el archivo [LICENSE](L
 ---
 
 <p align="center">
-  Desarrollado con ❤️ por <strong>Franco Isaac Ruz Valenzuela</strong>
+  Sistema de gestión interna de materiales de bodega
 </p>

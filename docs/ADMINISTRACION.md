@@ -2,7 +2,7 @@
 
 ## Permisos actuales
 
-| Acción | Consulta autorizada | M. Silva | Franco |
+| Acción | Consulta autorizada | Editor | Administrador |
 | --- | --- | --- | --- |
 | Consultar inventario, historial y reportes | Sí | Sí | Sí |
 | Registrar conteo individual | Sí | Sí | Sí |
@@ -22,7 +22,7 @@ Cambiar un editor exige verificar identidad, actualizar código/reglas, probar y
 
 1. Crear la cuenta por el procedimiento autorizado en Firebase Authentication.
 2. Verificar correo y copiar el UID exacto; no compartir contraseñas.
-3. Franco abre Usuarios, indica UID, correo y nombre y autoriza.
+3. El administrador abre Usuarios, indica UID, correo y nombre y autoriza.
 4. Comprobar ingreso y rechazo de modificaciones de stock.
 
 Usuarios no crea cuentas ni comprueba automáticamente la correspondencia
@@ -32,7 +32,7 @@ consultas en editores. Un UID existente se gestiona desde su entrada de la lista
 
 ## Revocar
 
-Franco revoca desde Usuarios. Las reglas bloquean nuevas operaciones y la
+El administrador revoca desde Usuarios. Las reglas bloquean nuevas operaciones y la
 aplicación observa la autorización para cerrar la sesión. No borra historial ni
 copias/exportaciones ya descargadas. Entradas antiguas sin nombre/correo pueden
 necesitar regularización administrativa porque la interfaz exige esos datos.
