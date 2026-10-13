@@ -37,6 +37,7 @@ export async function logAction(action, user, details = {}) {
  * Genera un mensaje legible para la acción
  */
 export function getActionMessage(action, userName, details = {}) {
+  if (!details.sku && !details.productName && details.description) return `${userName}: ${details.description}`;
   const product = details.productName
     ? (details.sku ? `${details.sku} (${details.productName})` : details.productName)
     : (details.sku || 'un producto');

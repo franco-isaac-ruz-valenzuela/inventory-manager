@@ -14,6 +14,7 @@ const navItems = [
   { label: 'Registros', type: 'section' },
   { href: '/reportes', icon: 'bi bi-bar-chart-line', label: 'Reportes' },
   { href: '/historial', icon: 'bi bi-clock-history', label: 'Historial' },
+  { href: '/usuarios', icon: 'bi bi-person-lock', label: 'Usuarios', adminOnly: true },
 ];
 
 export default function Sidebar({ isOpen, onClose }) {
@@ -55,6 +56,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
         <nav className="sidebar-nav">
           {navItems.map((item, index) => {
+            if (item.adminOnly && currentUser?.uid !== 'TadrO5T20Ka4g1vRUfDZBeNl5q22') return null;
             if (item.type === 'section') {
               return (
                 <div key={index} className="sidebar-section-label">

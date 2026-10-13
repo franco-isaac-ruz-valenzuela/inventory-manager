@@ -9,7 +9,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, accessError } = useAuth();
   const router = useRouter();
 
   const handleSubmit = async (e) => {
@@ -61,7 +61,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {error && <div className="login-error">{error}</div>}
+        {(error || accessError) && <div className="login-error">{error || accessError}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">

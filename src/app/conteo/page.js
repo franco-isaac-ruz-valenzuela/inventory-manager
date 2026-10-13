@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { db } from '../../lib/firebase';
 import {
   collection,
+  runTransaction,
   onSnapshot,
   writeBatch,
   doc,
@@ -12,14 +13,20 @@ import {
   setDoc,
   updateDoc,
   FieldPath,
+  deleteField,
 } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
+import { commitInventoryChanges } from '../../lib/inventoryOperations';
+import { parseQuantity } from '../../lib/validation';
+import { savePhysicalCount } from '../../lib/physicalCountOperations';
 import { logAction } from '../../lib/auditLog';
 import { sendNotification } from '../../lib/notifications';
 import { generateDiffReport, downloadWorkbook } from '../../lib/excelUtils';
 import {
   getProductMainType,
   detectProductColor,
+  detectProductLength,
+  sortLengthKeys,
 } from '../../lib/stockRules';
 import BarcodeScanner from '../../components/BarcodeScanner';
 
@@ -46,6 +53,23 @@ const getCategoryStyle = (cat) => {
 };
 
 const DRAFT_STORAGE_KEY = 'leker_physical_audit_v1';
+
+function getTodaySessionName() {
+  const today = new Date().toLocaleDateString('es-CL', {
+    timeZone: 'America/Santiago',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+  return `Conteo Físico Bodega — ${today}`;
+}
+
+// Refresh automatic titles when restoring a draft; preserve custom session names.
+function refreshSessionName(name) {
+  return /^Conteo Físico Bodega\s*[—–-]\s*\d{1,2} de .+ de \d{4}$/i.test(name || '')
+    ? getTodaySessionName()
+    : (name || getTodaySessionName());
+}
 
 export default function ConteoFisicoPage() {
   const { currentUser, canEdit } = useAuth();
@@ -85,20 +109,13 @@ export default function ConteoFisicoPage() {
   const [updatedByMap, setUpdatedByMap] = useState({});
 
   // Nombre de la sesión de conteo
-  const [sessionName, setSessionName] = useState(() => {
-    const today = new Date().toLocaleDateString('es-CL', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    });
-    return `Conteo Físico Bodega — ${today}`;
-  });
+  const [sessionName, setSessionName] = useState(getTodaySessionName);
 
   // Filtros
   const [search, setSearch] = useState('');
-  const [selectedMainType, setSelectedMainType] = useState('all');
-  const [selectedColor, setSelectedColor] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedLength, setSelectedLength] = useState('all');
+  const [selectedColor, setSelectedColor] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all'); // all | diff | faltante | sobrante | exacto | contados | pendientes
 
   // Modales
@@ -142,7 +159,7 @@ export default function ConteoFisicoPage() {
           setExtraProducts(parsed.extraProducts);
         }
         if (parsed.sessionName) {
-          setSessionName(parsed.sessionName);
+          setSessionName(refreshSessionName(parsed.sessionName));
         }
       }
     } catch (err) {
@@ -169,20 +186,68 @@ export default function ConteoFisicoPage() {
 
   // Timers para debouncing de sincronización a la nube
   const syncDebounceTimers = useRef({});
+  const cloudCountsRef = useRef({});
+  const countWriteBaseRef = useRef({});
+  const countQueuesRef = useRef({});
+  const pendingCountsRef = useRef({});
+  const unsavedCountsRef = useRef(new Set());
+  useEffect(() => () => {
+    Object.values(syncDebounceTimers.current).forEach(clearTimeout);
+    syncDebounceTimers.current = {};
+    countWriteBaseRef.current = {};
+  }, [currentUser?.uid]);
 
-  // 2. Suscripción en tiempo real a la sesión de conteo activa en Firestore (Multi-dispositivo)
+  // 2. Suscripción en tiempo real a la sesión de conteo activa en Firestore (Multi-dispositivo colaborativo)
   useEffect(() => {
     const auditDocRef = doc(db, 'active_physical_audit', 'current');
     const unsub = onSnapshot(auditDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const incomingCounts = (data.counts && typeof data.counts === 'object') ? data.counts : {};
 
-        if (data.extraProducts && typeof data.extraProducts === 'object') {
-          const mergedExtras = { ...extraProductsRef.current, ...data.extraProducts };
-          extraProductsRef.current = mergedExtras;
-          setExtraProducts(mergedExtras);
-        }
+        // Extraer counts, extraProducts y updatedByMap tolerando mapas anidados y claves planas
+        const incomingCounts = { ...(typeof data.counts === 'object' && data.counts !== null ? data.counts : {}) };
+        const incomingExtras = { ...(typeof data.extraProducts === 'object' && data.extraProducts !== null ? data.extraProducts : {}) };
+        const incomingUpdatedBy = { ...(typeof data.updatedByMap === 'object' && data.updatedByMap !== null ? data.updatedByMap : {}) };
+
+        Object.keys(data).forEach((key) => {
+          if (key.startsWith('counts.')) {
+            const pId = key.substring(7);
+            if (incomingCounts[pId] === undefined) incomingCounts[pId] = data[key];
+          } else if (key.startsWith('extraProducts.')) {
+            const pId = key.substring(14);
+            if (incomingExtras[pId] === undefined) incomingExtras[pId] = data[key];
+          } else if (key.startsWith('updatedByMap.')) {
+            const pId = key.substring(13);
+            if (incomingUpdatedBy[pId] === undefined) incomingUpdatedBy[pId] = data[key];
+          }
+        });
+
+        // Sincronizar catálogo de productos extras agregados en bodega
+        extraProductsRef.current = incomingExtras;
+        setExtraProducts(incomingExtras);
+
+        // Combinar conteos: La nube es la fuente de verdad colaborativa.
+        // Solo protegemos el producto que este cliente está activamente tipeando con debounce en este instante.
+        cloudCountsRef.current = incomingCounts;
+        const mergedCounts = { ...incomingCounts };
+        Object.keys(syncDebounceTimers.current).forEach((pId) => {
+          if (countedMapRef.current[pId] !== undefined) {
+            mergedCounts[pId] = countedMapRef.current[pId];
+          }
+        });
+        Object.keys(pendingCountsRef.current).forEach((pId) => {
+          if (pendingCountsRef.current[pId] > 0 && countedMapRef.current[pId] !== undefined) {
+            mergedCounts[pId] = countedMapRef.current[pId];
+          }
+        });
+        unsavedCountsRef.current.forEach((pId) => {
+          if (countedMapRef.current[pId] !== undefined) mergedCounts[pId] = countedMapRef.current[pId];
+        });
+
+        countedMapRef.current = mergedCounts;
+        setCountedMap(mergedCounts);
+
+        setUpdatedByMap(incomingUpdatedBy);
 
         const incomingSessionName = data.sessionName;
         const incomingMonth = data.monthKey;
@@ -195,28 +260,12 @@ export default function ConteoFisicoPage() {
           });
         }
 
-        // Combinar datos entrantes de la nube con ediciones locales.
-        // Si el usuario modificó algún producto en este dispositivo (touchedMapRef), conservamos su valor local
-        // para que un snapshot viejo no le pise lo que acaba de escribir.
-        const mergedCounts = { ...incomingCounts };
-        Object.keys(countedMapRef.current).forEach((pId) => {
-          if (touchedMapRef.current[pId]) {
-            mergedCounts[pId] = countedMapRef.current[pId];
-          }
-        });
-
-        countedMapRef.current = mergedCounts;
-        setCountedMap(mergedCounts);
-
-        if (data.updatedByMap) {
-          setUpdatedByMap((prev) => ({ ...prev, ...data.updatedByMap }));
-        }
-        if (incomingSessionName) setSessionName(incomingSessionName);
+        if (incomingSessionName) setSessionName(refreshSessionName(incomingSessionName));
         if (data.lastUpdated) {
           setCloudLastUpdated(data.lastUpdated.toDate ? data.lastUpdated.toDate() : new Date());
         }
         if (data.lastUpdatedBy) setCloudUpdatedBy(data.lastUpdatedBy);
-        setCloudSynced(true);
+        setCloudSynced(unsavedCountsRef.current.size === 0);
       } else {
         // Inicializar documento en la nube si aún no existe
         setDoc(auditDocRef, {
@@ -259,54 +308,46 @@ export default function ConteoFisicoPage() {
   }, [countedMap, touchedMap, sessionName, extraProducts, loading, products.length, currentMonthKey]);
 
   // Sincronizar un conteo a la nube (Firestore usando FieldPath atómico para no romper claves con puntos)
-  const syncCountToCloud = useCallback(async (productId, num) => {
-    try {
-      const auditDocRef = doc(db, 'active_physical_audit', 'current');
-      const uName = currentUser?.displayName || currentUser?.email || 'Usuario';
-      const timeStr = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-      const cleanNum = Math.max(0, Number(num) || 0);
-      const strId = String(productId);
-
+  const syncCountToCloud = useCallback((productId, num, delta = null) => {
+    const strId = String(productId);
+    unsavedCountsRef.current.add(strId);
+    setCloudSynced(false);
+    pendingCountsRef.current[strId] = (pendingCountsRef.current[strId] || 0) + 1;
+    const save = async () => {
       try {
-        await updateDoc(
-          auditDocRef,
-          new FieldPath('counts', strId),
-          cleanNum,
-          new FieldPath('updatedByMap', strId),
-          { userName: uName, time: timeStr },
-          'lastUpdated',
-          serverTimestamp(),
-          'lastUpdatedBy',
-          uName
-        );
-      } catch (updateErr) {
-        // Si no existe aún el documento o la ruta no existe, inicializar con setDoc y merge
-        await setDoc(auditDocRef, {
-          sessionName,
-          monthKey: currentMonthKey,
-          status: 'in_progress',
-          counts: {
-            [strId]: cleanNum,
-          },
-          updatedByMap: {
-            [strId]: {
-              userName: uName,
-              time: timeStr,
-            },
-          },
-          lastUpdated: serverTimestamp(),
-          lastUpdatedBy: uName,
-        }, { merge: true });
+      const cleanNum = parseQuantity(num);
+      if (cleanNum < 0) throw new Error('El conteo no puede ser negativo.');
+      const expected = countWriteBaseRef.current[strId] ?? Number(cloudCountsRef.current[strId] || 0);
+      const saved = await savePhysicalCount(db, currentUser, strId, cleanNum, {expected, delta});
+      cloudCountsRef.current[strId] = saved;
+      countWriteBaseRef.current[strId] = saved;
+      if (pendingCountsRef.current[strId] === 1 && !syncDebounceTimers.current[strId]) {
+        countedMapRef.current[strId] = saved;
+        setCountedMap((prev) => ({ ...prev, [strId]: saved }));
+        delete countWriteBaseRef.current[strId];
+        unsavedCountsRef.current.delete(strId);
       }
+      setCloudSynced(unsavedCountsRef.current.size === 0);
     } catch (err) {
-      console.warn('Error sincronizando con Firestore:', err);
+      delete countWriteBaseRef.current[productId];
+      setFeedbackMsg('No se guardó el conteo: ' + err.message);
+      setCloudSynced(false);
+    } finally {
+      pendingCountsRef.current[strId] -= 1;
     }
-  }, [sessionName, currentMonthKey, currentUser]);
+    };
+    const queued = (countQueuesRef.current[strId] || Promise.resolve()).then(save);
+    countQueuesRef.current[strId] = queued;
+    return queued;
+  }, [currentUser]);
 
-  // Actualizar conteo de un producto específico (UI optimista + Limpieza de 0 + Debounce sync)
   const setCountForProduct = useCallback((productId, value) => {
     // 1. Filtrar solo dígitos
-    const numericOnly = String(value).replace(/[^0-9]/g, '');
+    const numericOnly = String(value).replace(',', '.');
+    if (!/^\d*(?:\.\d{0,2})?$/.test(numericOnly)) return;
+    unsavedCountsRef.current.add(String(productId));
+    setCloudSynced(false);
+    if (countWriteBaseRef.current[productId] === undefined) countWriteBaseRef.current[productId] = Number(cloudCountsRef.current[productId] || 0);
 
     // 2. Si el usuario borró todo con Backspace, permitir que el input quede vacío mientras tipea
     if (numericOnly === '') {
@@ -327,7 +368,7 @@ export default function ConteoFisicoPage() {
 
     // 3. Eliminar ceros a la izquierda (ej: "0294" -> "294")
     const cleanStr = numericOnly.replace(/^0+(?=\d)/, '');
-    const num = Math.max(0, parseInt(cleanStr, 10) || 0);
+    const num = Math.max(0, Number(cleanStr) || 0);
 
     countedMapRef.current[productId] = num;
     touchedMapRef.current[productId] = true;
@@ -346,6 +387,7 @@ export default function ConteoFisicoPage() {
 
   // Incrementar o decrementar conteo (UI optimista + Sync Nube sincrónica)
   const adjustCount = useCallback((productId, delta) => {
+    const hasUnsavedInput = unsavedCountsRef.current.has(String(productId));
     const current = Number(countedMapRef.current[productId]) || 0;
     const nextNum = Math.max(0, current + delta);
     countedMapRef.current[productId] = nextNum;
@@ -356,14 +398,15 @@ export default function ConteoFisicoPage() {
     if (syncDebounceTimers.current[productId]) {
       clearTimeout(syncDebounceTimers.current[productId]);
     }
-    syncDebounceTimers.current[productId] = setTimeout(() => {
-      syncCountToCloud(productId, nextNum);
-      delete syncDebounceTimers.current[productId];
-    }, 200);
+    delete syncDebounceTimers.current[productId];
+    syncCountToCloud(productId, nextNum, hasUnsavedInput ? null : delta);
   }, [syncCountToCloud]);
 
   // Marcar conteo igual al stock del sistema (teórico)
   const setEqualToSystem = useCallback((product) => {
+    clearTimeout(syncDebounceTimers.current[product.id]);
+    delete syncDebounceTimers.current[product.id];
+    countWriteBaseRef.current[product.id] = Number(cloudCountsRef.current[product.id] || 0);
     const sys = Math.max(0, Number(product.quantity) || 0);
     countedMapRef.current[product.id] = sys;
     touchedMapRef.current[product.id] = true;
@@ -374,6 +417,9 @@ export default function ConteoFisicoPage() {
 
   // Poner en 0
   const setToZero = useCallback((productId) => {
+    clearTimeout(syncDebounceTimers.current[productId]);
+    delete syncDebounceTimers.current[productId];
+    countWriteBaseRef.current[productId] = Number(cloudCountsRef.current[productId] || 0);
     countedMapRef.current[productId] = 0;
     touchedMapRef.current[productId] = true;
     setCountedMap((prev) => ({ ...prev, [productId]: 0 }));
@@ -381,15 +427,15 @@ export default function ConteoFisicoPage() {
     syncCountToCloud(productId, 0);
   }, [syncCountToCloud]);
 
-  // Combinar catálogo del sistema + productos extras agregados manualmente en bodega
+  // Combinar catálogo del sistema + productos extras agregados manualmente en bodega (ordenados por SKU)
   const allAuditedProducts = useMemo(() => {
     const list = [...products];
     Object.values(extraProducts).forEach((extra) => {
-      if (!list.some((p) => p.id === extra.id || (p.sku && p.sku.toLowerCase() === (extra.sku || '').toLowerCase()))) {
+      if (extra && extra.id && !list.some((p) => p.id === extra.id || (p.sku && p.sku.toLowerCase() === (extra.sku || '').toLowerCase()))) {
         list.push(extra);
       }
     });
-    return list;
+    return list.sort((a, b) => (a.sku || '').localeCompare(b.sku || ''));
   }, [products, extraProducts]);
 
   // Manejo de lectura de escáner (cámara o código de barras)
@@ -400,7 +446,7 @@ export default function ConteoFisicoPage() {
 
     if (match) {
       adjustCount(match.id, 1);
-      const nextVal = (Number(countedMapRef.current[match.id]) || 0) + 1;
+      const nextVal = Number(countedMapRef.current[match.id]) || 0;
       setLastScannedMsg({
         success: true,
         text: `+1 a ${match.sku} (${match.name}) — Conteo actual: ${nextVal} uds`,
@@ -414,22 +460,82 @@ export default function ConteoFisicoPage() {
     }
   }, [allAuditedProducts, adjustCount]);
 
-  // Agregar producto no listado encontrado en bodega
+  // Agregar producto no listado encontrado en bodega o actualizar conteo si ya existe en catálogo
   const handleAddExtraProduct = async (e) => {
     e.preventDefault();
+    if (!canEdit) { setFeedbackMsg('Solo un editor puede agregar productos al conteo.'); return; }
     if (!newProductForm.sku.trim() || !newProductForm.name.trim()) return;
 
     const cleanSku = newProductForm.sku.trim().toUpperCase();
     const cleanName = newProductForm.name.trim();
     const qty = Math.max(0, parseInt(newProductForm.countedQty, 10) || 1);
-    const extraId = `extra_${Date.now()}`;
 
+    const uName = currentUser?.displayName || currentUser?.email || 'Usuario';
+    const timeStr = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+    const auditDocRef = doc(db, 'active_physical_audit', 'current');
+
+    // 1. Si el SKU ya existe en el catálogo maestro o en extras existentes
+    const existingProduct = allAuditedProducts.find(
+      (p) => (p.sku || '').trim().toUpperCase() === cleanSku
+    );
+
+    if (existingProduct) {
+      const targetId = existingProduct.id;
+      countedMapRef.current[targetId] = qty;
+      touchedMapRef.current[targetId] = true;
+
+      setCountedMap((prev) => ({ ...prev, [targetId]: qty }));
+      setTouchedMap((prev) => ({ ...prev, [targetId]: true }));
+
+      setSelectedCategory('all');
+      setStatusFilter('all');
+      setSearch(cleanSku);
+
+      setFeedbackMsg(`El SKU "${cleanSku}" ya existía en el catálogo (${existingProduct.name}). Se actualizó su conteo a ${qty} uds.`);
+      setTimeout(() => setFeedbackMsg(''), 6000);
+      setShowAddProductModal(false);
+      setNewProductForm({ sku: '', name: '', category: 'PLANCHAS', color: 'clear', countedQty: 1 });
+
+      try {
+        await updateDoc(
+          auditDocRef,
+          new FieldPath('counts', String(targetId)),
+          qty,
+          new FieldPath('updatedByMap', String(targetId)),
+          { userName: uName, time: timeStr },
+          'lastUpdated',
+          serverTimestamp(),
+          'lastUpdatedBy',
+          uName
+        );
+      } catch (err) {
+        await setDoc(
+          auditDocRef,
+          {
+            sessionName,
+            monthKey: currentMonthKey,
+            status: 'in_progress',
+            counts: { [targetId]: qty },
+            updatedByMap: { [targetId]: { userName: uName, time: timeStr } },
+            lastUpdated: serverTimestamp(),
+            lastUpdatedBy: uName,
+          },
+          { merge: true }
+        );
+      }
+      return;
+    }
+
+    // 2. Producto no listado (nuevo en bodega)
+    const extraId = `extra_${Date.now()}`;
     const newExtra = {
       id: extraId,
       sku: cleanSku,
       name: cleanName,
       category: newProductForm.category,
-      color: ['ALVEOLAR', 'ONDULADAS', 'PACK', 'INDUSTRIAL', 'COMPACTO', 'ROLLO', 'PLANCHAS'].some(k => newProductForm.category.toUpperCase().includes(k))
+      color: ['ALVEOLAR', 'ONDULADAS', 'PACK', 'INDUSTRIAL', 'COMPACTO', 'ROLLO', 'PLANCHAS'].some((k) =>
+        newProductForm.category.toUpperCase().includes(k)
+      )
         ? newProductForm.color
         : null,
       quantity: 0, // En sistema es 0 porque es un producto no registrado previamente
@@ -437,7 +543,7 @@ export default function ConteoFisicoPage() {
     };
 
     // Actualización local inmediata sincrónica
-    extraProductsRef.current[extraId] = newExtra;
+    extraProductsRef.current = { ...extraProductsRef.current, [extraId]: newExtra };
     countedMapRef.current[extraId] = qty;
     touchedMapRef.current[extraId] = true;
 
@@ -446,35 +552,33 @@ export default function ConteoFisicoPage() {
     setTouchedMap((prev) => ({ ...prev, [extraId]: true }));
 
     // Limpiar filtros y colocar el SKU nuevo en búsqueda para que el operario lo vea al instante
-    setSelectedMainType('all');
     setSelectedCategory('all');
-    setSelectedColor('all');
     setStatusFilter('all');
     setSearch(cleanSku);
 
-    setFeedbackMsg(`Producto "${cleanSku}" agregado al conteo con ${qty} uds.`);
+    setFeedbackMsg(`Producto nuevo "${cleanSku}" agregado al conteo con ${qty} uds.`);
     setTimeout(() => setFeedbackMsg(''), 6000);
     setShowAddProductModal(false);
     setNewProductForm({ sku: '', name: '', category: 'PLANCHAS', color: 'clear', countedQty: 1 });
 
     try {
-      const auditDocRef = doc(db, 'active_physical_audit', 'current');
-      const uName = currentUser?.displayName || currentUser?.email || 'Usuario';
-      const timeStr = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-
-      try {
-        await updateDoc(auditDocRef, {
-          [`counts.${extraId}`]: qty,
-          [`extraProducts.${extraId}`]: newExtra,
-          [`updatedByMap.${extraId}`]: {
-            userName: uName,
-            time: timeStr,
-          },
-          lastUpdated: serverTimestamp(),
-          lastUpdatedBy: uName,
-        });
-      } catch (err) {
-        await setDoc(auditDocRef, {
+      await updateDoc(
+        auditDocRef,
+        new FieldPath('extraProducts', extraId),
+        newExtra,
+        new FieldPath('counts', extraId),
+        qty,
+        new FieldPath('updatedByMap', extraId),
+        { userName: uName, time: timeStr },
+        'lastUpdated',
+        serverTimestamp(),
+        'lastUpdatedBy',
+        uName
+      );
+    } catch (err) {
+      await setDoc(
+        auditDocRef,
+        {
           sessionName,
           monthKey: currentMonthKey,
           status: 'in_progress',
@@ -492,24 +596,70 @@ export default function ConteoFisicoPage() {
           },
           lastUpdated: serverTimestamp(),
           lastUpdatedBy: uName,
-        }, { merge: true });
-      }
+        },
+        { merge: true }
+      );
+    }
+  };
+
+  // Eliminar un producto extra agregado manualmente de la sesión de auditoría
+  const handleRemoveExtraProduct = async (extraId) => {
+    if (!canEdit) { setFeedbackMsg('Solo un editor puede eliminar productos del conteo.'); return; }
+    if (!window.confirm('¿Eliminar este producto agregado manualmente de la auditoría en curso?')) return;
+
+    setExtraProducts((prev) => {
+      const copy = { ...prev };
+      delete copy[extraId];
+      return copy;
+    });
+    setCountedMap((prev) => {
+      const copy = { ...prev };
+      delete copy[extraId];
+      return copy;
+    });
+    delete extraProductsRef.current[extraId];
+    delete countedMapRef.current[extraId];
+
+    try {
+      const auditDocRef = doc(db, 'active_physical_audit', 'current');
+      await updateDoc(
+        auditDocRef,
+        new FieldPath('extraProducts', extraId),
+        deleteField(),
+        new FieldPath('counts', extraId),
+        deleteField(),
+        new FieldPath('updatedByMap', extraId),
+        deleteField(),
+        'lastUpdated', serverTimestamp()
+      );
     } catch (err) {
-      console.warn('Error guardando producto extra en Firestore:', err);
+      console.warn('Error eliminando producto extra en Firestore:', err);
+      setFeedbackMsg('No se pudo eliminar el producto del conteo. Recarga para recuperar los datos guardados.');
     }
   };
 
   // Reiniciar todo a 0 (en local y en la nube para todos los dispositivos)
   const handleResetAll = async () => {
+    if (!canEdit) { setFeedbackMsg('Solo un editor puede reiniciar el conteo.'); return; }
+    Object.values(syncDebounceTimers.current).forEach(clearTimeout);
+    syncDebounceTimers.current = {};
+    if (Object.values(pendingCountsRef.current).some((count) => count > 0)) {
+      setFeedbackMsg('Espera a que termine el guardado antes de reiniciar el conteo.');
+      return;
+    }
+    unsavedCountsRef.current.clear();
     setCountedMap({});
     setTouchedMap({});
     setExtraProducts({});
+    countedMapRef.current = {};
+    touchedMapRef.current = {};
+    extraProductsRef.current = {};
     try {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
       const auditDocRef = doc(db, 'active_physical_audit', 'current');
       const uName = currentUser?.displayName || currentUser?.email || 'Usuario';
       await setDoc(auditDocRef, {
-        sessionName: `Conteo Físico Bodega — ${new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })}`,
+        sessionName: getTodaySessionName(),
         monthKey: currentMonthKey,
         status: 'in_progress',
         counts: {},
@@ -520,6 +670,8 @@ export default function ConteoFisicoPage() {
       });
     } catch (e) {
       console.warn('Error reseteando en la nube:', e);
+      setFeedbackMsg('No se pudo reiniciar el conteo. Recarga para recuperar los datos guardados.');
+      return;
     }
     setShowResetModal(false);
     setFeedbackMsg('Todo el conteo físico ha sido reiniciado a 0 en todos los dispositivos.');
@@ -528,6 +680,7 @@ export default function ConteoFisicoPage() {
 
   // Copiar todo el sistema a conteo (sincroniza en la nube)
   const handleCopyAllSystem = async () => {
+    if (!canEdit) { setFeedbackMsg('Solo un editor puede copiar todo el inventario.'); return; }
     if (!window.confirm('¿Copiar todo el stock del sistema al conteo físico? Luego podrás ajustar solo los que tengan diferencias.')) return;
     const newMap = {};
     const newTouch = {};
@@ -549,6 +702,8 @@ export default function ConteoFisicoPage() {
       }, { merge: true });
     } catch (e) {
       console.warn(e);
+      setFeedbackMsg('No se pudo copiar el stock al conteo. Recarga para recuperar los datos guardados.');
+      return;
     }
     setFeedbackMsg('Se copiaron las cantidades teóricas a la nube para todos los dispositivos.');
     setTimeout(() => setFeedbackMsg(''), 5000);
@@ -584,7 +739,9 @@ export default function ConteoFisicoPage() {
     const calculatedItems = allAuditedProducts.map((p) => {
       const systemQty = Number(p.quantity) || 0;
       const countedQty = Number(countedMap[p.id]) || 0;
-      const isTouched = !!touchedMap[p.id];
+      const hasCloudUpdate = Boolean(updatedByMap[p.id]);
+      const hasCountedValue = countedMap[p.id] !== undefined && countedMap[p.id] !== null && countedMap[p.id] !== '';
+      const isTouched = Boolean(touchedMap[p.id] || hasCloudUpdate || (hasCountedValue && (countedQty > 0 || hasCloudUpdate)));
       const diff = countedQty - systemQty; // Físico - Teórico
       const mainType = getProductMainType(p);
       const color = p.color || detectProductColor(p);
@@ -623,6 +780,7 @@ export default function ConteoFisicoPage() {
         countedQty,
         diff,
         isTouched,
+        hasCloudUpdate,
         mainType,
         color,
         status: diff === 0 ? 'exacto' : diff > 0 ? 'sobrante' : 'faltante',
@@ -650,33 +808,42 @@ export default function ConteoFisicoPage() {
       },
       familySummary: Object.values(families),
     };
-  }, [allAuditedProducts, countedMap, touchedMap]);
+  }, [allAuditedProducts, countedMap, touchedMap, updatedByMap]);
+
+  const categoryCounts = itemsWithDiff.reduce((acc, item) => { const cat = (item.category || 'SIN CATEGORÍA').trim().toUpperCase(); acc[cat] = (acc[cat] || 0) + 1; return acc; }, {});
+  const categories = Object.keys(categoryCounts).sort((a, b) => a.localeCompare(b, 'es'));
+  const colorOptions = [
+    { value: 'opal', label: 'Opal' },
+    { value: 'bronce', label: 'Bronce' },
+    { value: 'clear', label: 'Clear' },
+    { value: 'otro', label: 'Otros / sin color' },
+  ];
+  const categoryProducts = itemsWithDiff.filter((p) => selectedCategory === 'all' || (p.category || 'SIN CATEGORÍA').trim().toUpperCase() === selectedCategory);
+  const lengthOptions = sortLengthKeys([...new Set(categoryProducts.map(detectProductLength).filter(Boolean))]);
+  const hasUnknownLength = categoryProducts.some((p) => !detectProductLength(p));
+  const hasActiveFilters = Boolean(search.trim() || selectedCategory !== 'all' || selectedLength !== 'all' || selectedColor !== 'all' || statusFilter !== 'all');
+  const clearFilters = () => {
+    setSearch('');
+    setSelectedCategory('all');
+    setSelectedLength('all');
+    setSelectedColor('all');
+    setStatusFilter('all');
+  };
 
   // --------------------------------------------------------------------------
-  // FILTRADO DINÁMICO DE PRODUCTOS PARA LA VISTA
+  // FILTRADO DINÁMICO DE PRODUCTOS PARA LA VISTA (Buscador único inteligente)
   // --------------------------------------------------------------------------
   const filteredItems = useMemo(() => {
     return itemsWithDiff.filter((item) => {
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const skuMatch = (item.sku || '').toLowerCase().includes(q);
-        const nameMatch = (item.name || '').toLowerCase().includes(q);
-        const catMatch = (item.category || '').toLowerCase().includes(q);
-        if (!skuMatch && !nameMatch && !catMatch) return false;
-      }
-
-      if (selectedMainType !== 'all') {
-        if (item.mainType !== selectedMainType) return false;
-      }
-
-      if (selectedColor !== 'all') {
-        if (item.color !== selectedColor) return false;
-      }
-
+      // 1. Filtro por Tipo de Plancha / Categoría (Onduladas, Alveolar, Perfiles, etc.)
       if (selectedCategory !== 'all') {
-        if ((item.category || '').toUpperCase() !== selectedCategory.toUpperCase()) return false;
+        const cat = (item.category || 'SIN CATEGORÍA').trim().toUpperCase();
+        if (cat !== selectedCategory) return false;
       }
+      if (selectedLength !== 'all' && (detectProductLength(item) || 'unknown') !== selectedLength) return false;
+      if (selectedColor !== 'all' && (item.color || detectProductColor(item) || 'otro') !== selectedColor) return false;
 
+      // 2. Filtro por estado de discrepancia / conteo
       if (statusFilter === 'diff') {
         if (item.diff === 0) return false;
       } else if (statusFilter === 'faltante') {
@@ -691,31 +858,37 @@ export default function ConteoFisicoPage() {
         if (item.countedQty > 0 || item.isTouched) return false;
       }
 
+      // 3. Buscador inteligente multi-palabra (Medidas, SKU, Tonos, Nombre, Categoría)
+      if (search.trim()) {
+        const term = search.trim().toLowerCase();
+        const keywords = term.split(/\s+/).filter(Boolean);
+
+        const sku = (item.sku || '').toLowerCase();
+        const name = (item.name || '').toLowerCase();
+        const cat = (item.category || '').toLowerCase();
+        const len = (detectProductLength(item) || '').toLowerCase();
+        const color = (detectProductColor(item) || item.color || '').toLowerCase();
+
+        const matchesAll = keywords.every((kw) => {
+          const cleanKw = kw.replace(/m$/, '');
+          const cleanLen = len.replace(/m$/, '');
+          const matchesLength = cleanLen && (cleanLen === cleanKw || len.includes(kw));
+
+          return (
+            sku.includes(kw) ||
+            name.includes(kw) ||
+            cat.includes(kw) ||
+            color.includes(kw) ||
+            matchesLength
+          );
+        });
+
+        if (!matchesAll) return false;
+      }
+
       return true;
     });
-  }, [itemsWithDiff, search, selectedMainType, selectedColor, selectedCategory, statusFilter]);
-
-  // Contadores de tonos para planchas
-  const planchaToneCounts = useMemo(() => {
-    const planchas = itemsWithDiff.filter((p) => p.mainType === 'planchas');
-    return {
-      all: planchas.length,
-      clear: planchas.filter((p) => p.color === 'clear').length,
-      opal: planchas.filter((p) => p.color === 'opal').length,
-      bronce: planchas.filter((p) => p.color === 'bronce').length,
-    };
-  }, [itemsWithDiff]);
-
-  // Modelos de planchas disponibles
-  const planchaModelList = useMemo(() => {
-    const planchas = itemsWithDiff.filter((p) => p.mainType === 'planchas');
-    const counts = {};
-    planchas.forEach((p) => {
-      const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
-      counts[cat] = (counts[cat] || 0) + 1;
-    });
-    return Object.entries(counts).map(([name, count]) => ({ name, count }));
-  }, [itemsWithDiff]);
+  }, [itemsWithDiff, search, selectedCategory, selectedLength, selectedColor, statusFilter]);
 
   // --------------------------------------------------------------------------
   // EXPORTAR REPORTE A EXCEL
@@ -844,64 +1017,21 @@ export default function ConteoFisicoPage() {
 
     setApplying(true);
     try {
-      const batch = writeBatch(db);
-
-      itemsToUpdate.forEach((d) => {
-        if (d.isExtra) {
-          // Si fue un producto nuevo ingresado en bodega, se crea en la base de datos maestra
-          const newDocRef = doc(collection(db, 'products'));
-          batch.set(newDocRef, {
-            sku: d.sku,
-            name: d.name,
-            category: d.category || 'SIN CATEGORÍA',
-            quantity: d.countedQty,
-            createdAt: serverTimestamp(),
-            lastUpdated: serverTimestamp(),
-            updatedBy: currentUser.uid,
-          });
-        } else {
-          const docRef = doc(db, 'products', d.id);
-          batch.update(docRef, {
-            quantity: d.countedQty,
-            lastUpdated: serverTimestamp(),
-            updatedBy: currentUser?.uid || 'anon',
-            lastAuditSession: sessionName,
-          });
-        }
-      });
-
-      await batch.commit();
-
-      // Guardar sesión en historial
-      await addDoc(collection(db, 'inventory_sessions'), {
-        name: `Conciliación: ${sessionName}`,
-        createdAt: serverTimestamp(),
-        createdBy: currentUser.uid,
-        createdByName: currentUser.displayName || currentUser.email,
-        status: 'applied_to_inventory',
-        auditType: 'conciliacion_directa',
-        previousFile: 'Inventario Anterior',
-        currentFile: 'Ajustado a Conteo Físico',
-        summary: {
-          total: metrics.total,
-          totalDifferences: itemsToUpdate.length,
-          added: metrics.sobrantesCount,
-          removed: metrics.faltantesCount,
-          changed: itemsToUpdate.length,
-          unchanged: metrics.exactMatches,
+      await commitInventoryChanges(itemsToUpdate.map((item) => ({
+        id: item.isExtra ? 'sku_' + encodeURIComponent(item.sku.toLowerCase()) : item.id,
+        kind: item.isExtra ? 'create' : 'set',
+        data: { sku: item.sku, name: item.name, category: item.category || 'SIN CATEGORÍA', quantity: item.countedQty },
+        ...(!item.isExtra ? { expectedQuantity: item.systemQty } : {}),
+      })), currentUser, {
+        action: 'conciliacion_inventario', description: 'Aplicó conteo físico ' + sessionName,
+        session: {
+          name: 'Conciliación: ' + sessionName,
+          createdByName: currentUser.displayName || currentUser.email,
+          status: 'applied_to_inventory', auditType: 'conciliacion_directa',
+          previousFile: 'Inventario Anterior', currentFile: 'Ajustado a Conteo Físico',
+          summary: { total: metrics.total, totalDifferences: itemsToUpdate.length, added: metrics.sobrantesCount, removed: metrics.faltantesCount, changed: itemsToUpdate.length, unchanged: metrics.exactMatches },
+          differences: itemsToUpdate.map((item) => ({ sku: item.sku, name: item.name, previousQty: item.systemQty, currentQty: item.countedQty, diff: item.diff, status: 'modificado' })),
         },
-        differences: itemsToUpdate.map((d) => ({
-          sku: d.sku,
-          name: d.name,
-          previousQty: d.systemQty,
-          currentQty: d.countedQty,
-          diff: d.diff,
-          status: d.diff > 0 ? 'nuevo' : 'eliminado',
-        })),
-      });
-
-      await logAction('conciliacion_inventario', currentUser, {
-        description: `Concilió inventario físico: Actualizó ${itemsToUpdate.length} productos en la base de datos según el conteo "${sessionName}".`,
       });
 
       await sendNotification(
@@ -964,7 +1094,7 @@ export default function ConteoFisicoPage() {
               title={cloudLastUpdated ? `Última sincronización por ${cloudUpdatedBy || 'Equipo'} a las ${cloudLastUpdated.toLocaleTimeString('es-CL')}` : 'Sincronización en vivo activada'}
             >
               <i className={`bi ${cloudSynced ? 'bi-broadcast text-success' : 'bi-cloud-slash'}`}></i>
-              <span>{cloudSynced ? 'En la nube (Multi-dispositivo en vivo)' : 'Conectando a la nube...'}</span>
+              <span>{cloudSynced ? 'Conteo guardado en la nube' : 'Conteos pendientes o sin conexión'}</span>
             </span>
           </div>
           <p className="page-description mb-0">
@@ -1079,7 +1209,7 @@ export default function ConteoFisicoPage() {
                 setCountedMap(monthAlert.draftData.counts || monthAlert.draftData.countedMap || {});
                 setTouchedMap(monthAlert.draftData.touchedMap || {});
                 if (monthAlert.draftData.extraProducts) setExtraProducts(monthAlert.draftData.extraProducts);
-                if (monthAlert.draftData.sessionName) setSessionName(monthAlert.draftData.sessionName);
+                if (monthAlert.draftData.sessionName) setSessionName(refreshSessionName(monthAlert.draftData.sessionName));
                 setMonthAlert(null);
               }}
             >
@@ -1239,14 +1369,8 @@ export default function ConteoFisicoPage() {
       {/* ==================================================================== */}
       {activeTab === 'conteo' && (
         <>
-          {/* Barra de Filtros y Búsqueda */}
-          <div
-            className="card mb-3 p-3 shadow-sm"
-            style={{ background: 'rgba(15, 15, 35, 0.95)', border: '1px solid rgba(255, 255, 255, 0.08)' }}
-          >
-            {/* Fila 1: Buscador y Filtro de Discrepancia */}
-            <div className="row g-2 align-items-center mb-2">
-              <div className="col-12 col-md-6 col-lg-7">
+          <div className="row g-2 align-items-center mb-3">
+              <div className="col-12 col-md-6">
                 <div className="input-group">
                   <span className="input-group-text bg-dark border-secondary text-secondary">
                     <i className="bi bi-search"></i>
@@ -1272,7 +1396,7 @@ export default function ConteoFisicoPage() {
               </div>
 
               {/* Filtro por estado de discrepancia */}
-              <div className="col-12 col-md-6 col-lg-5">
+              <div className="col-12 col-md-6">
                 <select
                   className="form-select bg-dark border-secondary text-light"
                   value={statusFilter}
@@ -1290,166 +1414,38 @@ export default function ConteoFisicoPage() {
               </div>
             </div>
 
-            {/* Fila 2: Familias Principales */}
-            <div className="d-flex align-items-center gap-1 flex-wrap pt-2 border-top border-secondary">
-              <span className="text-secondary small fw-bold text-uppercase me-2" style={{ fontSize: '11px' }}>
-                Familia:
-              </span>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedMainType === 'all' ? 'btn-primary' : 'btn-outline-secondary text-light'}`}
-                onClick={() => {
-                  setSelectedMainType('all');
-                  setSelectedColor('all');
-                  setSelectedCategory('all');
-                }}
-                style={{ fontSize: '12px' }}
-              >
-                Todos ({itemsWithDiff.length})
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedMainType === 'planchas' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
-                onClick={() => {
-                  setSelectedMainType('planchas');
-                  setSelectedCategory('all');
-                }}
-                style={{ fontSize: '12px' }}
-              >
-                <i className="bi bi-grid-3x3 me-1"></i>
-                Planchas ({planchaToneCounts.all})
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedMainType === 'perfiles' ? 'btn-warning text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
-                onClick={() => {
-                  setSelectedMainType('perfiles');
-                  setSelectedColor('all');
-                  setSelectedCategory('all');
-                }}
-                style={{ fontSize: '12px' }}
-              >
-                <i className="bi bi-rulers me-1"></i>
-                Perfiles ({itemsWithDiff.filter((p) => p.mainType === 'perfiles').length})
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedMainType === 'accesorios' ? 'btn-secondary text-light fw-bold' : 'btn-outline-secondary text-light'}`}
-                onClick={() => {
-                  setSelectedMainType('accesorios');
-                  setSelectedColor('all');
-                  setSelectedCategory('all');
-                }}
-                style={{ fontSize: '12px' }}
-              >
-                <i className="bi bi-wrench me-1"></i>
-                Accesorios ({itemsWithDiff.filter((p) => p.mainType === 'accesorios').length})
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedMainType === 'pinturas' ? 'btn-outline-light' : 'btn-outline-secondary text-light'}`}
-                onClick={() => {
-                  setSelectedMainType('pinturas');
-                  setSelectedColor('all');
-                  setSelectedCategory('all');
-                }}
-                style={{ fontSize: '12px' }}
-              >
-                <i className="bi bi-paint-bucket me-1"></i>
-                Pinturas ({itemsWithDiff.filter((p) => p.mainType === 'pinturas').length})
-              </button>
-
-              {(selectedMainType !== 'all' || selectedColor !== 'all' || selectedCategory !== 'all' || statusFilter !== 'all' || search) && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-link text-info text-decoration-none fw-semibold ms-auto d-inline-flex align-items-center gap-1"
-                  onClick={() => {
-                    setSelectedMainType('all');
-                    setSelectedColor('all');
-                    setSelectedCategory('all');
-                    setStatusFilter('all');
-                    setSearch('');
-                  }}
-                  style={{ fontSize: '12px' }}
-                >
-                  <i className="bi bi-x-circle"></i> Limpiar filtros
-                </button>
-              )}
-            </div>
-
-            {/* Sub-barra de Planchas: Tono (Clear, Opal, Bronce) y Modelos */}
-            {selectedMainType === 'planchas' && (
-              <div
-                className="mt-2 p-2 rounded"
-                style={{ background: 'rgba(0, 212, 255, 0.05)', border: '1px solid rgba(0, 212, 255, 0.2)' }}
-              >
-                {/* Tono */}
-                <div className="d-flex align-items-center gap-1 flex-wrap mb-1">
-                  <span className="text-secondary small fw-bold text-uppercase me-2" style={{ fontSize: '11px' }}>
-                    <i className="bi bi-palette text-info me-1"></i>Tono:
-                  </span>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${selectedColor === 'all' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-secondary'}`}
-                    onClick={() => setSelectedColor('all')}
-                    style={{ fontSize: '11px', padding: '2px 8px' }}
-                  >
-                    Todas ({planchaToneCounts.all})
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${selectedColor === 'clear' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-secondary'}`}
-                    onClick={() => setSelectedColor('clear')}
-                    style={{ fontSize: '11px', padding: '2px 8px' }}
-                  >
-                    <i className="bi bi-droplet-half me-1"></i>Solo Clear ({planchaToneCounts.clear})
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${selectedColor === 'opal' ? 'btn-light text-dark fw-bold' : 'btn-outline-secondary text-secondary'}`}
-                    onClick={() => setSelectedColor('opal')}
-                    style={{ fontSize: '11px', padding: '2px 8px' }}
-                  >
-                    <i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Solo Opal ({planchaToneCounts.opal})
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${selectedColor === 'bronce' ? 'btn-warning text-dark fw-bold' : 'btn-outline-secondary text-secondary'}`}
-                    onClick={() => setSelectedColor('bronce')}
-                    style={{ fontSize: '11px', padding: '2px 8px' }}
-                  >
-                    <i className="bi bi-sun-fill me-1"></i>Solo Bronce ({planchaToneCounts.bronce})
-                  </button>
-                </div>
-
-                {/* Modelo */}
-                <div className="d-flex align-items-center gap-1 flex-wrap pt-1 border-top border-secondary">
-                  <span className="text-secondary small fw-bold text-uppercase me-2" style={{ fontSize: '11px' }}>
-                    <i className="bi bi-tag text-secondary me-1"></i>Modelo:
-                  </span>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${selectedCategory === 'all' ? 'btn-outline-info text-info fw-bold' : 'btn-outline-secondary text-secondary'}`}
-                    onClick={() => setSelectedCategory('all')}
-                    style={{ fontSize: '11px', padding: '2px 8px' }}
-                  >
-                    Todos
-                  </button>
-                  {planchaModelList.map((m) => (
-                    <button
-                      key={m.name}
-                      type="button"
-                      className={`btn btn-sm ${selectedCategory === m.name ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-secondary'}`}
-                      onClick={() => setSelectedCategory(m.name)}
-                      style={{ fontSize: '11px', padding: '2px 8px' }}
-                    >
-                      {m.name} ({m.count})
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+      <section className="inventory-filters" aria-label="Filtros de conteo físico">
+        <div className="inventory-filters-heading">
+          <div><span className="inventory-filter-eyebrow">EXPLORAR CONTEO FÍSICO</span><h2>Encuentra tu producto</h2><p>Elige el tipo, la medida y el color. Puedes combinar los filtros.</p></div>
+          {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
+        </div>
+        <div className="inventory-filter-row">
+          <div className="inventory-filter-label"><span>01</span><h3>Tipo de plancha / familia</h3></div>
+          <div className="inventory-filter-options">
+            <button type="button" className={`inventory-filter-chip ${selectedCategory === 'all' ? 'active' : ''}`} aria-pressed={selectedCategory === 'all'} onClick={() => { setSelectedCategory('all'); setSelectedLength('all'); setSelectedColor('all'); }}>Todos los tipos <small>{itemsWithDiff.length}</small></button>
+            {categories.map((cat) => <button key={cat} type="button" className={`inventory-filter-chip ${selectedCategory === cat ? 'active' : ''}`} aria-pressed={selectedCategory === cat} onClick={() => { setSelectedCategory(cat); setSelectedLength('all'); setSelectedColor('all'); }}><i className={`bi ${getCategoryStyle(cat).icon}`} />{cat.charAt(0) + cat.slice(1).toLowerCase()}<small>{categoryCounts[cat]}</small></button>)}
           </div>
+        </div>
+        <div className="inventory-filter-row">
+          <div className="inventory-filter-label"><span>02</span><h3>Medida / largo</h3></div>
+          <div className="inventory-filter-options">
+            <button type="button" className={`inventory-filter-chip ${selectedLength === 'all' ? 'active' : ''}`} aria-pressed={selectedLength === 'all'} onClick={() => setSelectedLength('all')}>Todas las medidas</button>
+            {lengthOptions.map((length) => <button key={length} type="button" className={`inventory-filter-chip ${selectedLength === length ? 'active' : ''}`} aria-pressed={selectedLength === length} onClick={() => setSelectedLength(length)}>{length.replace('m', ' m')}</button>)}
+            {hasUnknownLength && <button type="button" className={`inventory-filter-chip ${selectedLength === 'unknown' ? 'active' : ''}`} aria-pressed={selectedLength === 'unknown'} onClick={() => setSelectedLength('unknown')}>Sin medida</button>}
+          </div>
+        </div>
+        <div className="inventory-filter-row">
+          <div className="inventory-filter-label"><span>03</span><h3>Color</h3></div>
+          <div className="inventory-filter-options">
+            <button type="button" className={`inventory-filter-chip ${selectedColor === 'all' ? 'active' : ''}`} aria-pressed={selectedColor === 'all'} onClick={() => setSelectedColor('all')}>Todos los colores</button>
+            {colorOptions.map((color) => <button key={color.value} type="button" className={`inventory-filter-chip ${selectedColor === color.value ? 'active' : ''}`} aria-pressed={selectedColor === color.value} onClick={() => setSelectedColor(color.value)}><span className={`inventory-color-swatch ${color.value}`} />{color.label}</button>)}
+          </div>
+        </div>
+        <div className="inventory-filter-footer">
+          <p role="status"><strong>{filteredItems.length}</strong> de {itemsWithDiff.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
+
+        </div>
+      </section>
 
           {/* Tabla de Conteo Físico (Desktop >= 992px) */}
           <div className="d-none d-lg-block">
@@ -1493,9 +1489,20 @@ export default function ConteoFisicoPage() {
                               {item.sku}
                             </code>
                             {item.isExtra && (
-                              <span className="badge bg-warning text-dark d-block mt-1 font-monospace" style={{ fontSize: '9px' }}>
-                                NUEVO EN BODEGA
-                              </span>
+                              <div className="d-flex align-items-center gap-1 mt-1">
+                                <span className="badge bg-warning text-dark font-monospace" style={{ fontSize: '9px' }}>
+                                  NUEVO EN BODEGA
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-link text-danger p-0"
+                                  title="Eliminar este producto extra del conteo"
+                                  onClick={() => handleRemoveExtraProduct(item.id)}
+                                  style={{ fontSize: '11px' }}
+                                >
+                                  <i className="bi bi-trash3"></i>
+                                </button>
+                              </div>
                             )}
                           </td>
 
@@ -1513,7 +1520,7 @@ export default function ConteoFisicoPage() {
                               </span>
                             )}
                             {item.color === 'bronce' && (
-                              <span className="badge me-1 mt-1" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', border: '1px solid rgba(217, 119, 6, 0.4)', fontSize: '11px' }}>
+                              <span className="badge me-1 mt-1 product-color-bronce">
                                 <i className="bi bi-sun-fill me-1"></i>Bronce
                               </span>
                             )}
@@ -1697,8 +1704,20 @@ export default function ConteoFisicoPage() {
                             {item.sku}
                           </code>
                           {item.isExtra && (
-                            <span className="badge bg-warning text-dark" style={{ fontSize: '9px' }}>
+                            <span className="badge bg-warning text-dark d-inline-flex align-items-center gap-1" style={{ fontSize: '9px' }}>
                               NUEVO
+                              <button
+                                type="button"
+                                className="btn btn-link text-danger p-0 border-0 ms-1"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveExtraProduct(item.id);
+                                }}
+                                title="Eliminar del conteo"
+                                style={{ fontSize: '10px', lineHeight: 1 }}
+                              >
+                                <i className="bi bi-x-circle-fill"></i>
+                              </button>
                             </span>
                           )}
                         </div>
@@ -1728,7 +1747,7 @@ export default function ConteoFisicoPage() {
                           </span>
                         )}
                         {item.color === 'bronce' && (
-                          <span className="badge ms-2" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', fontSize: '10px' }}>
+                          <span className="badge ms-2 product-color-bronce">
                             Bronce
                           </span>
                         )}

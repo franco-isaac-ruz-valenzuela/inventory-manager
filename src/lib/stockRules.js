@@ -169,7 +169,7 @@ export function isLowStock(product) {
 
 /**
  * Retorna un texto descriptivo del umbral de la categoría o producto (ej: "< 50 uds" o "Sin alerta (ignorado)")
- * @param {string|Object} category 
+ * @param {string|Object} category
  * @param {Object} [product]
  * @returns {string}
  */
@@ -211,3 +211,128 @@ export function detectProductColor(p) {
   return null;
 }
 
+/**
+ * Normaliza un número flotante de largo en metros a un string estándar (ej: '5.80m', '3.66m', '2.0m').
+ * @param {number} num
+ * @returns {string}
+ */
+export function normalizeLengthString(num) {
+  if (Math.abs(num - 11.6) < 0.05) return '11.60m';
+  if (Math.abs(num - 8.7) < 0.05) return '8.70m';
+  if (Math.abs(num - 6) < 0.05) return '6.0m';
+  if (Math.abs(num - 5.8) < 0.05) return '5.80m';
+  if (Math.abs(num - 5) < 0.05) return '5.0m';
+  if (Math.abs(num - 4) < 0.05) return '4.0m';
+  if (Math.abs(num - 3.66) < 0.03) return '3.66m';
+  if (Math.abs(num - 3) < 0.05) return '3.0m';
+  if (Math.abs(num - 2.9) < 0.05) return '2.90m';
+  if (Math.abs(num - 2.5) < 0.05) return '2.5m';
+  if (Math.abs(num - 2.44) < 0.03) return '2.44m';
+  if (Math.abs(num - 2) < 0.05) return '2.0m';
+  if (Math.abs(num - 1.5) < 0.05) return '1.5m';
+  if (Math.abs(num - 1) < 0.05) return '1.0m';
+  if (Math.abs(num - 0.81) < 0.05) return '0.81m';
+  return `${num % 1 === 0 ? num.toFixed(1) : num}m`;
+}
+
+/**
+ * Detecta la medida o largo lineal (en metros) de un producto a partir de su nombre o SKU.
+ * Identifica tanto multiplicaciones (ej: 0.81x3.66 -> 3.66m, 2.10x5.80 -> 5.80m)
+ * como largos directos (ej: 8.70, 6.00MT, 5.80, 3M).
+ * Evita falsos positivos con espesores (4MM, 6MM, 8MM, etc.) o productos químicos.
+ * @param {Object} product
+ * @returns {string|null}
+ */
+export function detectProductLength(product) {
+  if (!product) return null;
+  const name = String(product.name || '');
+  const sku = String(product.sku || '');
+  const text = `${name} ${sku}`.toUpperCase();
+
+  // Excluir categorías de productos que no tienen largo lineal
+  const cat = String(product.category || '').toUpperCase();
+  if (
+    cat.includes('PINTUR') ||
+    cat.includes('ADHESIV') ||
+    text.includes('SILICON') ||
+    text.includes('SPRAY') ||
+    text.includes('TORNILL') ||
+    text.includes('GOLILLA')
+  ) {
+    return null;
+  }
+
+  // 1. Patrón multiplicativo Ancho x Largo (ej: 0.81X1, 0,81 X 3.66, 2.10 X 5.80, 2.10X11.60, 0.35 X 3.66)
+  // El largo es el segundo número (después de X o *)
+  const multMatch = text.match(/(?:\d+(?:[.,]\d+)?)\s*[xX*]\s*(\d+(?:[.,]\d+)?)(?:\s*(?:M|MT|MTS|METROS)?)?(?!\s*MM)\b/);
+  if (multMatch) {
+    const rawVal = multMatch[1].replace(',', '.');
+    const num = parseFloat(rawVal);
+    if (!isNaN(num) && num >= 0.5 && num <= 20) {
+      return normalizeLengthString(num);
+    }
+  }
+
+  // 2. Medidas específicas estándar muy representativas en bodega (decimales típicos de planchas y perfiles)
+  if (/\b11[.,]60?\b/.test(text)) return '11.60m';
+  if (/\b8[.,]70?\b/.test(text)) return '8.70m';
+  if (/\b5[.,]80?\b/.test(text)) return '5.80m';
+  if (/\b3[.,]66\b/.test(text)) return '3.66m';
+  if (/\b2[.,]90?\b/.test(text)) return '2.90m';
+  if (/\b2[.,]44\b/.test(text)) return '2.44m';
+  if (/\b2[.,]50?\b(?!\s*MM)/.test(text)) return '2.5m';
+  if (/\b1[.,]50?\b(?!\s*MM)/.test(text)) return '1.5m';
+
+  // 3. Patrones con unidad explícita de metros (MT, MTS, METROS) pero NO MM
+  const unitMatch = text.match(/\b(\d+(?:[.,]\d+)?)\s*(?:MT|MTS|METROS)\b/);
+  if (unitMatch) {
+    const num = parseFloat(unitMatch[1].replace(',', '.'));
+    if (!isNaN(num) && num >= 0.8 && num <= 15) {
+      return normalizeLengthString(num);
+    }
+  }
+
+  // Coincidir "6M", "5M", "3M" etc., asegurando que NO sea MM ni ML
+  const singleMMatch = text.match(/\b([1-9](?:[.,]\d+)?)\s*M(?![ML\w])/);
+  if (singleMMatch) {
+    const num = parseFloat(singleMMatch[1].replace(',', '.'));
+    if (!isNaN(num) && num >= 0.8 && num <= 15) {
+      return normalizeLengthString(num);
+    }
+  }
+
+  // 4. Si el nombre tiene enteros terminados en .0 / ,0 (ej: 6.0, 5.0, 4.0, 3.0, 2.0)
+  const decimalZeroMatch = text.match(/\b([1-6])[.,]00?\b(?!\s*MM)/);
+  if (decimalZeroMatch) {
+    const num = parseFloat(decimalZeroMatch[1]);
+    return normalizeLengthString(num);
+  }
+
+  return null;
+}
+
+/**
+ * Detecta espesor en milímetros (ej: 4mm, 6mm, 8mm, 10mm).
+ * @param {Object} product
+ * @returns {string|null}
+ */
+export function detectProductThickness(product) {
+  if (!product) return null;
+  const text = `${product?.name || ''} ${product?.sku || ''}`.toUpperCase();
+  const match = text.match(/\b(4|6|8|10|16)\s*MM\b/);
+  if (match) return `${match[1]}mm`;
+  return null;
+}
+
+/**
+ * Ordena un conjunto de etiquetas de largo (ej: ['5.80m', '2.0m', '3.66m']) de menor a mayor.
+ * @param {string[]} keys
+ * @returns {string[]}
+ */
+export function sortLengthKeys(keys) {
+  return [...keys].sort((a, b) => {
+    const numA = parseFloat(a) || 0;
+    const numB = parseFloat(b) || 0;
+    return numA - numB;
+  });
+}

@@ -8,7 +8,7 @@ export const viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: 'cover',
-  themeColor: '#06060f',
+  themeColor: '#101214',
 };
 
 export const metadata = {

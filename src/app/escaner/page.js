@@ -13,6 +13,8 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
+import { commitInventoryChanges, adjustProductStock } from '../../lib/inventoryOperations';
+import { parseQuantity } from '../../lib/validation';
 import { logAction } from '../../lib/auditLog';
 import { sendNotification } from '../../lib/notifications';
 import BarcodeScanner from '../../components/BarcodeScanner';
@@ -72,23 +74,9 @@ export default function EscanerPage() {
     }
     setUpdating(true);
 
-    const currentQty = Number(product.quantity) || 0;
-    const newQty = currentQty + delta;
-
     try {
-      await updateDoc(doc(db, 'products', product.id), {
-        quantity: newQty,
-        lastUpdated: serverTimestamp(),
-        updatedBy: currentUser?.uid || 'anon',
-      });
-
-      const action = delta > 0 ? 'cantidad_agregada' : 'cantidad_descontada';
-      await logAction(action, currentUser, {
-        sku: product.sku,
-        productName: product.name,
-        previousValue: currentQty,
-        newValue: newQty,
-      });
+      const changed = await adjustProductStock(product.id, delta, currentUser);
+      const newQty = changed.next.quantity;
 
       const msg = delta > 0
         ? `${currentUser?.displayName || currentUser?.email || 'Usuario'} agregó ${delta} uds a ${product.sku} (${product.name})`
@@ -124,23 +112,11 @@ export default function EscanerPage() {
     try {
       const cleanSku = scannedCode.trim();
       const cleanName = newProductName.trim();
-      const qty = parseInt(newProductQty) || 0;
+      const qty = parseQuantity(newProductQty);
 
-      const docRef = await addDoc(collection(db, 'products'), {
-        sku: cleanSku,
-        name: cleanName,
-        quantity: qty,
-        createdAt: serverTimestamp(),
-        lastUpdated: serverTimestamp(),
-        updatedBy: currentUser.uid,
-      });
-
-      await logAction('producto_agregado', currentUser, {
-        sku: cleanSku,
-        productName: cleanName,
-        newValue: qty,
-        description: `Agregó producto escaneado ${cleanSku} (${cleanName}) con stock ${qty}`,
-      });
+      const newId = 'sku_' + encodeURIComponent(cleanSku.toLowerCase());
+      await commitInventoryChanges([{ id: newId, kind: 'create', data: { sku: cleanSku, name: cleanName, quantity: qty } }], currentUser, { action: 'producto_agregado', description: 'Creó producto desde escáner ' + cleanSku });
+      const docRef = { id: newId };
 
       await sendNotification(
         'creado',

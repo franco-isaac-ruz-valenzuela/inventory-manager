@@ -1,3 +1,5 @@
+import { parseQuantity } from './validation.js';
+import * as XLSX_READER_LIB from '@e965/xlsx';
 import * as XLSX_LIB from 'xlsx-js-style';
 import { isLowStock, getLowStockThreshold } from './stockRules.js';
 
@@ -55,7 +57,8 @@ export function parseExcelFile(file) {
     reader.onload = (event) => {
       try {
         const data = new Uint8Array(event.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
+        const readerLibrary = XLSX_READER_LIB.default || XLSX_READER_LIB;
+        const workbook = readerLibrary.read(data, { type: 'array', cellFormula: false });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
 
@@ -92,6 +95,7 @@ export function parseExcelFile(file) {
       }
     };
     reader.onerror = () => reject(new Error('Error al cargar el archivo'));
+    if (!file || file.size > 10 * 1024 * 1024) { reject(new Error('El archivo debe pesar como máximo 10 MB.')); return; }
     reader.readAsArrayBuffer(file);
   });
 }
@@ -123,12 +127,13 @@ export function detectColumns(data) {
  * Normaliza los datos del Excel a un formato estándar
  */
 export function normalizeData(data, columnMapping) {
-  return data.map((row) => {
+  return data.filter((row) => Object.values(row).some((value) => String(value ?? '').trim())).map((row, index) => {
     const item = {
-      sku: String(row[columnMapping.sku] || '').trim(),
+      sku: String(row[columnMapping.sku] ?? '').trim(),
       name: String(row[columnMapping.name] || '').trim(),
-      quantity: parseInt(row[columnMapping.quantity]) || 0,
+      quantity: parseQuantity(row[columnMapping.quantity], `Fila ${index + 2}`),
     };
+    if (!item.sku || item.sku.length > 100 || item.name.length > 200) throw new Error(`Fila ${index + 2}: SKU o nombre inválido.`);
     if (columnMapping.category) {
       item.category = String(row[columnMapping.category] || '').trim().toUpperCase() || 'SIN CATEGORÍA';
     }
@@ -181,11 +186,13 @@ export function consolidateDuplicates(normalizedData) {
  * Compara dos inventarios y genera las diferencias
  */
 export function compareInventories(previousData, currentData) {
+  previousData = consolidateDuplicates(previousData).consolidated;
+  currentData = consolidateDuplicates(currentData).consolidated;
   const prevMap = new Map();
-  previousData.forEach((item) => prevMap.set(item.sku, item));
+  previousData.forEach((item) => prevMap.set(item.sku.toLowerCase(), item));
 
   const currMap = new Map();
-  currentData.forEach((item) => currMap.set(item.sku, item));
+  currentData.forEach((item) => currMap.set(item.sku.toLowerCase(), item));
 
   const differences = [];
   let added = 0;
@@ -1768,6 +1775,9 @@ export function generateDiffReport(comparisonResult, sessionName = 'Reporte') {
  * Exporta el historial de auditoría del sistema a un Excel con diseño corporativo
  */
 export function exportHistoryToExcel(logs = [], filename = 'historial_actividad.xlsx') {
+  logs = logs.flatMap((log) => log.movements && Object.keys(log.movements).length > 1
+    ? Object.values(log.movements).map((movement) => ({ ...log, details: { ...log.details, ...movement } }))
+    : [log]);
   const wb = XLSX.utils.book_new();
   const now = formatDate(new Date());
 

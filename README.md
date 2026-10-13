@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Next.js-14.2-black?style=for-the-badge&logo=next.js" alt="Next.js" />
+  <img src="https://img.shields.io/badge/Next.js-16.4-black?style=for-the-badge&logo=next.js" alt="Next.js" />
   <img src="https://img.shields.io/badge/Firebase-Firestore-FFA611?style=for-the-badge&logo=firebase" alt="Firebase" />
   <img src="https://img.shields.io/badge/Bootstrap_Icons-1.11-7952B3?style=for-the-badge&logo=bootstrap" alt="Bootstrap Icons" />
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License MIT" />
@@ -47,7 +47,7 @@
 
 ## 🛠️ Tecnologías Utilizadas
 
-* **Frontend:** [Next.js 14](https://nextjs.org/) (React, App Router, Server Components & Client Hooks)
+* **Frontend:** [Next.js 16](https://nextjs.org/) (React, App Router, Server Components & Client Hooks)
 * **Estilos:** Vanilla CSS con Dark Mode premium, Glassmorphism y diseño responsivo.
 * **Íconos:** [Bootstrap Icons](https://icons.getbootstrap.com/)
 * **Base de Datos & Auth:** [Google Firebase](https://firebase.google.com/) (Cloud Firestore & Authentication)

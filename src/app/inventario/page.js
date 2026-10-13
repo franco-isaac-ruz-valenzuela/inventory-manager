@@ -16,6 +16,8 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
+import { commitInventoryChanges, adjustProductStock } from '../../lib/inventoryOperations';
+import { parseQuantity, parseQuantityExpression } from '../../lib/validation';
 import { logAction } from '../../lib/auditLog';
 import { sendNotification } from '../../lib/notifications';
 import {
@@ -25,13 +27,17 @@ import {
   normalizeData,
   consolidateDuplicates,
 } from '../../lib/excelUtils';
-import { isLowStock, getLowStockThreshold, isProductIgnoredFromStock } from '../../lib/stockRules';
+import { isLowStock, getLowStockThreshold, isProductIgnoredFromStock, detectProductLength, sortLengthKeys } from '../../lib/stockRules';
 
 export default function InventarioPage() {
   const { currentUser, canEdit } = useAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedLength, setSelectedLength] = useState('all');
+  const [selectedColor, setSelectedColor] = useState('all');
+  const [stockFilter, setStockFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [formData, setFormData] = useState({ sku: '', name: '', quantity: '', category: '' });
@@ -40,12 +46,7 @@ export default function InventarioPage() {
   const [modalNotaPedido, setModalNotaPedido] = useState('');
   const [updatingProductIds, setUpdatingProductIds] = useState(new Set());
 
-  // Estados para Familias, Categorías, Tono / Color y Filtro de Stock
-  const [selectedMainType, setSelectedMainType] = useState('all'); // 'all' | 'planchas' | 'perfiles' | 'accesorios' | 'pinturas'
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedColor, setSelectedColor] = useState('all'); // 'all' | 'clear' | 'opal' | 'bronce'
-  const [selectedStockStatus, setSelectedStockStatus] = useState('all'); // 'all' | 'bajo_stock' | 'ignorados'
-  const [viewMode, setViewMode] = useState('flat'); // 'flat' | 'grouped'
+  const [viewMode, setViewMode] = useState('grouped'); // 'flat' | 'grouped'
   const [openSections, setOpenSections] = useState(new Set());
 
   // Estados para Descontar por Nota de Pedido
@@ -72,6 +73,8 @@ export default function InventarioPage() {
   const [importSuccess, setImportSuccess] = useState('');
   const [consolidationInfo, setConsolidationInfo] = useState(null);
   const fileInputRef = useRef(null);
+  const savingProductRef = useRef(false);
+  const pendingStockRef = useRef(new Set());
 
   useEffect(() => {
     const q = query(collection(db, 'products'), orderBy('name', 'asc'));
@@ -88,7 +91,7 @@ export default function InventarioPage() {
 
   // Extraer categorías únicas con conteos
   const categoryCounts = products.reduce((acc, p) => {
-    const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
+    const cat = (p.category || 'SIN CATEGORÍA').trim().toUpperCase();
     acc[cat] = (acc[cat] || 0) + 1;
     return acc;
   }, {});
@@ -144,85 +147,90 @@ export default function InventarioPage() {
   const detectProductColor = (p) => {
     const text = `${p?.name || ''} ${p?.sku || ''}`.toUpperCase();
     if (/\bOPAL\b/.test(text)) return 'opal';
-    if (/\bBRONCE\b/.test(text)) return 'bronce';
-    if (/\bCLEAR\b/.test(text) || /\bTRANSPARENTE\b/.test(text)) return 'clear';
+    if (/\bBRONCE\b|\bBRONZ\b/.test(text)) return 'bronce';
+    if (/\bCLEAR\b|\bCRISTAL\b/.test(text) || /\bTRANSPARENTE\b/.test(text)) return 'clear';
     return 'otro';
   };
 
-  // Conteos calculados para la familia principal
-  const mainTypeCounts = {
-    all: products.length,
-    planchas: products.filter((p) => getProductMainType(p) === 'planchas').length,
-    perfiles: products.filter((p) => getProductMainType(p) === 'perfiles').length,
-    accesorios: products.filter((p) => getProductMainType(p) === 'accesorios').length,
-    pinturas: products.filter((p) => getProductMainType(p) === 'pinturas').length,
+  const colorOptions = [
+    { value: 'opal', label: 'Opal' },
+    { value: 'bronce', label: 'Bronce' },
+    { value: 'clear', label: 'Clear' },
+    { value: 'otro', label: 'Otros / sin color' },
+  ];
+  const categoryProducts = products.filter((p) => selectedCategory === 'all' || (p.category || 'SIN CATEGORÍA').trim().toUpperCase() === selectedCategory);
+  const lengthOptions = sortLengthKeys([...new Set(categoryProducts.map(detectProductLength).filter(Boolean))]);
+  const hasUnknownLength = categoryProducts.some((p) => !detectProductLength(p));
+  const hasActiveFilters = Boolean(search.trim() || selectedCategory !== 'all' || selectedLength !== 'all' || selectedColor !== 'all' || stockFilter !== 'all');
+  const clearFilters = () => {
+    setSearch('');
+    setSelectedCategory('all');
+    setSelectedLength('all');
+    setSelectedColor('all');
+    setStockFilter('all');
   };
 
-  // Planchas y sus categorías específicas para el subfiltro
-  const planchaProducts = products.filter((p) => getProductMainType(p) === 'planchas');
-  const planchaCategories = Object.keys(
-    planchaProducts.reduce((acc, p) => {
-      const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
-      acc[cat] = (acc[cat] || 0) + 1;
-      return acc;
-    }, {})
-  ).sort();
-
-  // Base para conteos de tono en Planchas (si hay una categoría específica seleccionada, se ajusta a ella)
-  const activePlanchaBase = selectedCategory !== 'all'
-    ? planchaProducts.filter((p) => (p.category || 'SIN CATEGORÍA').toUpperCase() === selectedCategory)
-    : planchaProducts;
-
-  const planchaColorCounts = {
-    all: activePlanchaBase.length,
-    clear: activePlanchaBase.filter((p) => detectProductColor(p) === 'clear').length,
-    opal: activePlanchaBase.filter((p) => detectProductColor(p) === 'opal').length,
-    bronce: activePlanchaBase.filter((p) => detectProductColor(p) === 'bronce').length,
-  };
-
-  // Conteos calculados para stock
-  const stockCounts = {
-    bajo_stock: products.filter((p) => isLowStock(p) && !isProductIgnoredFromStock(p)).length,
-    ignorados: products.filter((p) => isProductIgnoredFromStock(p)).length,
-  };
-
+  // Filtro general único inteligente
   const filteredProducts = products.filter((p) => {
-    const s = search.toLowerCase();
-    const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
-    const name = (p.name || '').toUpperCase();
-    const sku = (p.sku || '').toUpperCase();
-
-    const matchesSearch =
-      sku.toLowerCase().includes(s) ||
-      name.toLowerCase().includes(s) ||
-      cat.toLowerCase().includes(s);
-
-    let matchesMainType = true;
-    if (selectedMainType !== 'all') {
-      matchesMainType = getProductMainType(p) === selectedMainType;
+    // 1. Filtro por Tipo de Plancha / Categoría (Onduladas, Alveolar, Perfiles, etc.)
+    if (selectedCategory !== 'all') {
+      const cat = (p.category || 'SIN CATEGORÍA').trim().toUpperCase();
+      if (cat !== selectedCategory) {
+        return false;
+      }
     }
 
-    const matchesCategory =
-      selectedCategory === 'all' || cat === selectedCategory;
+    if (selectedLength !== 'all' && (detectProductLength(p) || 'unknown') !== selectedLength) return false;
+    if (selectedColor !== 'all' && detectProductColor(p) !== selectedColor) return false;
+    if (stockFilter === 'low' && !isLowStock(p)) return false;
+    if (stockFilter === 'zero' && Number(p.quantity) !== 0) return false;
 
-    const pColor = detectProductColor(p);
-    const matchesColor =
-      selectedColor === 'all' || pColor === selectedColor;
+    if (!search.trim()) return true;
 
-    let matchesStock = true;
-    if (selectedStockStatus === 'bajo_stock') {
-      matchesStock = isLowStock(p) && !isProductIgnoredFromStock(p);
-    } else if (selectedStockStatus === 'ignorados') {
-      matchesStock = isProductIgnoredFromStock(p);
+    const term = search.trim().toLowerCase();
+    const isSpecialStock = term === 'bajo stock' || term === 'stock bajo' || term === 'bajo' || term === 'alerta';
+
+    if (isSpecialStock) {
+      return isLowStock(p) && !isProductIgnoredFromStock(p);
     }
 
-    return matchesSearch && matchesMainType && matchesCategory && matchesColor && matchesStock;
+    const keywords = term.split(/\s+/).filter(Boolean);
+
+    const sku = (p.sku || '').toLowerCase();
+    const name = (p.name || '').toLowerCase();
+    const cat = (p.category || 'SIN CATEGORÍA').toLowerCase();
+    const len = (detectProductLength(p) || '').toLowerCase();
+    const color = (detectProductColor(p) || '').toLowerCase();
+
+    return keywords.every((kw) => {
+      // Si la búsqueda coincide con una medida (ej: "5.80", "5.80m", "5.8", "3.66", "8.70", "2.5")
+      const cleanKw = kw.replace(/m$/, '');
+      const cleanLen = len.replace(/m$/, '');
+      const matchesLength = cleanLen && (cleanLen === cleanKw || len.includes(kw));
+
+      return (
+        sku.includes(kw) ||
+        name.includes(kw) ||
+        cat.includes(kw) ||
+        color.includes(kw) ||
+        matchesLength
+      );
+    });
+  });
+
+  filteredProducts.sort((a, b) => {
+    const categoryOrder = (a.category || 'SIN CATEGORÍA').localeCompare(b.category || 'SIN CATEGORÍA', 'es');
+    if (categoryOrder) return categoryOrder;
+    const lengthOrder = (parseFloat(detectProductLength(a)) || Infinity) - (parseFloat(detectProductLength(b)) || Infinity);
+    if (lengthOrder && !Number.isNaN(lengthOrder)) return lengthOrder;
+    const colorOrder = ['opal', 'bronce', 'clear', 'otro'];
+    return colorOrder.indexOf(detectProductColor(a)) - colorOrder.indexOf(detectProductColor(b)) || (a.name || '').localeCompare(b.name || '', 'es', { numeric: true });
   });
 
   // Agrupación por categoría para vista agrupada
   const groupedProducts = {};
   filteredProducts.forEach((p) => {
-    const cat = (p.category || 'SIN CATEGORÍA').toUpperCase();
+    const cat = (p.category || 'SIN CATEGORÍA').trim().toUpperCase();
     if (!groupedProducts[cat]) groupedProducts[cat] = [];
     groupedProducts[cat].push(p);
   });
@@ -282,19 +290,39 @@ export default function InventarioPage() {
           {/* Nombre Producto */}
           <h6 className="card-title fw-bold text-light mb-3 d-flex align-items-center justify-content-between flex-wrap gap-1" style={{ fontSize: '15px', lineHeight: 1.35, wordBreak: 'break-word' }}>
             <span>{product.name}</span>
-            {(() => {
-              const col = detectProductColor(product);
-              if (col === 'clear') {
-                return <span className="badge" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff', fontSize: '11px', border: '1px solid rgba(0, 212, 255, 0.3)' }}><i className="bi bi-droplet-half me-1"></i>Clear</span>;
-              }
-              if (col === 'opal') {
-                return <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#f8fafc', fontSize: '11px', border: '1px solid rgba(255, 255, 255, 0.3)' }}><i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Opal</span>;
-              }
-              if (col === 'bronce') {
-                return <span className="badge" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', fontSize: '11px', border: '1px solid rgba(217, 119, 6, 0.4)' }}><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
-              }
-              return null;
-            })()}
+            <div className="d-flex align-items-center gap-1 flex-wrap">
+              {(() => {
+                const len = detectProductLength(product);
+                if (!len) return null;
+                return (
+                  <span
+                    className="badge font-monospace"
+                    style={{
+                      background: 'rgba(245, 158, 11, 0.15)',
+                      color: '#fbbf24',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      fontSize: '11px',
+                    }}
+                    title={`Largo / Medida: ${len}`}
+                  >
+                    <i className="bi bi-rulers me-1"></i>{len}
+                  </span>
+                );
+              })()}
+              {(() => {
+                const col = detectProductColor(product);
+                if (col === 'clear') {
+                  return <span className="badge" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff', fontSize: '11px', border: '1px solid rgba(0, 212, 255, 0.3)' }}><i className="bi bi-droplet-half me-1"></i>Clear</span>;
+                }
+                if (col === 'opal') {
+                  return <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#f8fafc', fontSize: '11px', border: '1px solid rgba(255, 255, 255, 0.3)' }}><i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Opal</span>;
+                }
+                if (col === 'bronce') {
+                  return <span className="badge product-color-bronce"><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
+                }
+                return null;
+              })()}
+            </div>
           </h6>
 
           {/* Fila Stock Actual + Stepper Táctil */}
@@ -407,24 +435,7 @@ export default function InventarioPage() {
   };
 
   const evaluateMathInput = (val) => {
-    if (typeof val === 'number') return isNaN(val) ? 0 : val;
-    if (!val || typeof val !== 'string') return 0;
-    const trimmed = val.trim();
-    if (!trimmed) return 0;
-    // Soporte para comas decimales ej: 27,5 -> 27.5
-    const normalized = trimmed.replace(/,/g, '.').replace(/\s+/g, '');
-    if (/^[+-]?\d+(\.\d+)?([+-]\d+(\.\d+)?)*$/.test(normalized)) {
-      try {
-        const tokens = normalized.match(/[+-]?[0-9]+(\.[0-9]+)?/g);
-        if (tokens) {
-          const sum = tokens.reduce((acc, t) => acc + parseFloat(t), 0);
-          return Math.round(sum * 100) / 100;
-        }
-      } catch {
-        return parseFloat(normalized) || 0;
-      }
-    }
-    return parseFloat(normalized) || 0;
+    try { return parseQuantityExpression(val); } catch { return NaN; }
   };
 
   const currentBaseQty = editProduct ? (Number(editProduct.quantity) || 0) : 0;
@@ -457,6 +468,7 @@ export default function InventarioPage() {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (savingProductRef.current) return;
     if (!canEdit) {
       alert('Solo Franco y M.silva tienen permisos para editar productos.');
       return;
@@ -469,40 +481,30 @@ export default function InventarioPage() {
       : evaluateMathInput(formData.quantity);
 
     if (!cleanSku || !cleanName) return;
+    if (!Number.isFinite(qty)) { alert('Ingresa una cantidad válida.'); return; }
+    if (products.some((p) => p.id !== editProduct?.id && p.sku.trim().toLowerCase() === cleanSku.toLowerCase())) { alert('Ya existe un producto con ese SKU.'); return; }
 
+    savingProductRef.current = true;
     try {
       if (editProduct) {
         // Editar
         const prevQty = Number(editProduct.quantity) || 0;
-        await updateDoc(doc(db, 'products', editProduct.id), {
-          sku: cleanSku,
-          name: cleanName,
-          category: cleanCategory,
-          quantity: qty,
-          lastUpdated: serverTimestamp(),
-          updatedBy: currentUser?.uid || 'anon',
-        });
-
-        const isDeduction = qty < prevQty;
-        const isAddition = qty > prevQty;
-        const diff = Math.abs(qty - prevQty);
+        const result = (await commitInventoryChanges([{
+          id: editProduct.id,
+          kind: stockEditMode === 'add' ? 'delta' : 'set',
+          delta: parsedAddQty,
+          data: { sku: cleanSku, name: cleanName, category: cleanCategory, quantity: qty },
+          expectedProduct: editProduct,
+          ...(stockEditMode === 'set' ? { expectedQuantity: editProduct.quantity } : {}),
+        }], currentUser, {
+          action: modalNotaPedido.trim() && qty < prevQty ? 'descuento_nota_pedido' : (qty > prevQty ? 'cantidad_agregada' : (qty < prevQty ? 'cantidad_descontada' : 'producto_editado')),
+          description: 'Editó producto ' + cleanSku,
+          orderNumber: modalNotaPedido.trim() || undefined,
+        }))[0];
+        const isDeduction = result.next.quantity < Number(result.previous.quantity);
+        const isAddition = result.next.quantity > Number(result.previous.quantity);
+        const diff = Math.abs(result.next.quantity - Number(result.previous.quantity));
         const hasNota = modalNotaPedido.trim().length > 0;
-
-        const action = hasNota && isDeduction
-          ? 'descuento_nota_pedido'
-          : (isAddition ? 'cantidad_agregada' : (isDeduction ? 'cantidad_descontada' : 'producto_editado'));
-
-        await logAction(action, currentUser, {
-          sku: cleanSku,
-          productName: cleanName,
-          category: cleanCategory,
-          previousValue: prevQty,
-          newValue: qty,
-          notaPedido: modalNotaPedido.trim(),
-          description: hasNota && isDeduction
-            ? `Descuento por Nota de Pedido #${modalNotaPedido.trim()}: ${diff} uds de ${cleanSku}`
-            : (qty !== prevQty ? `${isAddition ? 'Sumó' : 'Descontó'} ${diff} uds a ${cleanSku} (${cleanName})` : `Editó ${cleanSku} (${cleanName})`),
-        });
 
         if (qty !== prevQty) {
           const msg = hasNota && isDeduction
@@ -514,23 +516,10 @@ export default function InventarioPage() {
         }
       } else {
         // Crear
-        await addDoc(collection(db, 'products'), {
-          sku: cleanSku,
-          name: cleanName,
-          category: cleanCategory,
-          quantity: qty,
-          createdAt: serverTimestamp(),
-          lastUpdated: serverTimestamp(),
-          updatedBy: currentUser?.uid || 'anon',
-        });
-
-        await logAction('producto_creado', currentUser, {
-          sku: cleanSku,
-          productName: cleanName,
-          category: cleanCategory,
-          newValue: qty,
-          description: `Creó producto ${cleanSku} (${cleanName}) con stock ${qty}`,
-        });
+        await commitInventoryChanges([{
+          id: 'sku_' + encodeURIComponent(cleanSku.toLowerCase()), kind: 'create',
+          data: { sku: cleanSku, name: cleanName, category: cleanCategory, quantity: qty },
+        }], currentUser, { action: 'producto_creado', description: 'Creó producto ' + cleanSku });
 
         await sendNotification(
           'creado',
@@ -544,6 +533,8 @@ export default function InventarioPage() {
     } catch (error) {
       console.error('Error guardando producto:', error);
       alert('Error al guardar producto: ' + error.message);
+    } finally {
+      savingProductRef.current = false;
     }
   };
 
@@ -557,14 +548,7 @@ export default function InventarioPage() {
     }
 
     try {
-      await deleteDoc(doc(db, 'products', product.id));
-
-      await logAction('producto_eliminado', currentUser, {
-        sku: product.sku,
-        productName: product.name,
-        previousValue: product.quantity,
-        description: `Eliminó ${product.sku} (${product.name})`,
-      });
+      await commitInventoryChanges([{ id: product.id, kind: 'delete', expectedQuantity: product.quantity }], currentUser, { action: 'producto_eliminado', description: 'Eliminó producto ' + product.sku });
 
       await sendNotification(
         'eliminado',
@@ -582,28 +566,12 @@ export default function InventarioPage() {
       alert('Solo Franco y M.silva tienen permisos para ajustar el stock.');
       return;
     }
-    if (updatingProductIds.has(product.id)) return;
+    if (pendingStockRef.current.has(product.id)) return;
+    pendingStockRef.current.add(product.id);
     setUpdatingProductIds((prev) => new Set(prev).add(product.id));
 
-    const currentQty = Number(product.quantity) || 0;
-    const newQty = Math.round((currentQty + delta) * 100) / 100;
-
     try {
-      await updateDoc(doc(db, 'products', product.id), {
-        quantity: newQty,
-        lastUpdated: serverTimestamp(),
-        updatedBy: currentUser?.uid || 'anon',
-      });
-
-      const action = delta > 0 ? 'cantidad_agregada' : 'cantidad_descontada';
-      await logAction(action, currentUser, {
-        sku: product.sku,
-        productName: product.name,
-        category: product.category,
-        previousValue: currentQty,
-        newValue: newQty,
-        description: `${delta > 0 ? 'Sumó' : 'Descontó'} ${Math.abs(delta)} ud(s) a ${product.sku} (${product.name})`,
-      });
+      await adjustProductStock(product.id, delta, currentUser, { description: (delta > 0 ? 'Sumó ' : 'Descontó ') + Math.abs(delta) + ' unidades de ' + product.sku });
 
       const msg = delta > 0
         ? `${currentUser?.displayName || currentUser?.email || 'Usuario'} agregó ${delta} uds a ${product.sku} (${product.name})`
@@ -613,6 +581,7 @@ export default function InventarioPage() {
       console.error('Error actualizando cantidad:', error);
       alert('Error al modificar cantidad: ' + error.message);
     } finally {
+      pendingStockRef.current.delete(product.id);
       setUpdatingProductIds((prev) => {
         const next = new Set(prev);
         next.delete(product.id);
@@ -723,29 +692,10 @@ export default function InventarioPage() {
     setNpSuccess('');
 
     try {
-      let totalUnits = 0;
-      for (const item of npItems) {
-        const qtyToDiscount = Number(item.quantityToDiscount);
-        totalUnits += qtyToDiscount;
-        const prevQty = Number(item.currentStock) || 0;
-        const newQty = Math.round((prevQty - qtyToDiscount) * 100) / 100;
-
-        await updateDoc(doc(db, 'products', item.id), {
-          quantity: newQty,
-          lastUpdated: serverTimestamp(),
-          updatedBy: currentUser?.uid || 'anon',
-        });
-
-        await logAction('descuento_nota_pedido', currentUser, {
-          sku: item.sku,
-          productName: item.name,
-          previousValue: prevQty,
-          newValue: newQty,
-          notaPedido: cleanNp,
-          cliente: npCliente.trim(),
-          description: `Descuento por Nota de Pedido #${cleanNp}: ${qtyToDiscount} uds de ${item.sku} (${item.name})`,
-        });
-      }
+      const totalUnits = npItems.reduce((sum, item) => sum + parseQuantity(item.quantityToDiscount), 0);
+      await commitInventoryChanges(npItems.map((item) => ({
+        id: item.id, kind: 'delta', delta: -parseQuantity(item.quantityToDiscount),
+      })), currentUser, { action: 'descuento_nota_pedido', orderNumber: cleanNp, customer: npCliente.trim(), description: 'Aplicó nota de pedido #' + cleanNp + ': ' + totalUnits + ' unidades' });
 
       await sendNotification(
         'descuento',
@@ -848,122 +798,35 @@ export default function InventarioPage() {
         });
       }
 
-      if (importMode === 'replace') {
-        setImportProgress('Eliminando inventario anterior...');
-        const BATCH_SIZE = 450;
-        for (let i = 0; i < products.length; i += BATCH_SIZE) {
-          const chunk = products.slice(i, i + BATCH_SIZE);
-          const batch = writeBatch(db);
-          chunk.forEach((p) => batch.delete(doc(db, 'products', p.id)));
-          await batch.commit();
-        }
-      }
-
+      if (!normalized.length) throw new Error('El archivo no contiene productos válidos.');
       const existingMap = new Map();
-      if (importMode !== 'replace') {
-        products.forEach((p) => existingMap.set(p.sku.toLowerCase(), p));
-      }
-
-      const BATCH_SIZE = 450;
-      let inserted = 0;
-      let updated = 0;
-      let skipped = 0;
-      let summed = 0;
-
-      for (let i = 0; i < normalized.length; i += BATCH_SIZE) {
-        const chunk = normalized.slice(i, i + BATCH_SIZE);
-        const batch = writeBatch(db);
-
-        for (const item of chunk) {
-          const key = item.sku.toLowerCase();
-          const existing = existingMap.get(key);
-
-          if (importMode === 'only_new') {
-            if (existing) {
-              skipped++;
-              continue;
-            }
-            const newRef = doc(collection(db, 'products'));
-            batch.set(newRef, {
-              sku: item.sku,
-              name: item.name || item.sku,
-              category: item.category || 'SIN CATEGORÍA',
-              quantity: item.quantity,
-              createdAt: serverTimestamp(),
-              lastUpdated: serverTimestamp(),
-              updatedBy: currentUser.uid,
-            });
-            inserted++;
-          } else if (importMode === 'replace') {
-            const newRef = doc(collection(db, 'products'));
-            batch.set(newRef, {
-              sku: item.sku,
-              name: item.name || item.sku,
-              category: item.category || 'SIN CATEGORÍA',
-              quantity: item.quantity,
-              createdAt: serverTimestamp(),
-              lastUpdated: serverTimestamp(),
-              updatedBy: currentUser.uid,
-            });
-            inserted++;
-          } else if (importMode === 'add_stock') {
-            // Sumar cantidades a lo existente
-            if (existing) {
-              const newQty = (existing.quantity || 0) + item.quantity;
-              const updatePayload = {
-                quantity: newQty,
-                lastUpdated: serverTimestamp(),
-                updatedBy: currentUser.uid,
-              };
-              if (item.name && item.name.length > (existing.name || '').length) {
-                updatePayload.name = item.name;
-              }
-              if (item.category) updatePayload.category = item.category;
-              batch.update(doc(db, 'products', existing.id), updatePayload);
-              summed++;
-            } else {
-              const newRef = doc(collection(db, 'products'));
-              batch.set(newRef, {
-                sku: item.sku,
-                name: item.name || item.sku,
-                category: item.category || 'SIN CATEGORÍA',
-                quantity: item.quantity,
-                createdAt: serverTimestamp(),
-                lastUpdated: serverTimestamp(),
-                updatedBy: currentUser.uid,
-              });
-              inserted++;
-            }
-          } else {
-            // upsert (actualizar o crear)
-            if (existing) {
-              const updatePayload = {
-                name: item.name || existing.name,
-                quantity: item.quantity,
-                lastUpdated: serverTimestamp(),
-                updatedBy: currentUser.uid,
-              };
-              if (item.category) updatePayload.category = item.category;
-              batch.update(doc(db, 'products', existing.id), updatePayload);
-              updated++;
-            } else {
-              const newRef = doc(collection(db, 'products'));
-              batch.set(newRef, {
-                sku: item.sku,
-                name: item.name || item.sku,
-                category: item.category || 'SIN CATEGORÍA',
-                quantity: item.quantity,
-                createdAt: serverTimestamp(),
-                lastUpdated: serverTimestamp(),
-                updatedBy: currentUser.uid,
-              });
-              inserted++;
-            }
-          }
+      products.forEach((p) => {
+        const key = p.sku.trim().toLowerCase();
+        if (existingMap.has(key)) throw new Error('El catálogo tiene SKU duplicados: ' + p.sku + '. Corrígelos antes de importar.');
+        existingMap.set(key, p);
+      });
+      let inserted = 0, updated = 0, skipped = 0, summed = 0;
+      const changes = [];
+      for (const item of normalized) {
+        const existing = existingMap.get(item.sku.toLowerCase());
+        if (existing && importMode === 'only_new') { skipped++; continue; }
+        if (existing) {
+          changes.push({ id: existing.id, kind: importMode === 'add_stock' ? 'delta' : 'set', delta: item.quantity,
+            data: { ...item, name: item.name || existing.name, category: item.category || existing.category || 'SIN CATEGORÍA' },
+            ...(importMode !== 'add_stock' ? { expectedQuantity: existing.quantity } : {}) });
+          if (importMode === 'add_stock') summed++; else updated++;
+        } else {
+          changes.push({ id: 'sku_' + encodeURIComponent(item.sku.toLowerCase()), kind: 'create', data: { ...item, name: item.name || item.sku } });
+          inserted++;
         }
-
-        setImportProgress(`Guardando lote ${Math.min(i + BATCH_SIZE, normalized.length)} de ${normalized.length}...`);
-        await batch.commit();
+      }
+      if (importMode === 'replace') {
+        const incoming = new Set(normalized.map((item) => item.sku.toLowerCase()));
+        products.filter((p) => !incoming.has(p.sku.trim().toLowerCase())).forEach((p) => changes.push({ id: p.id, kind: 'delete', expectedQuantity: p.quantity }));
+      }
+      if (changes.length) {
+        setImportProgress('Validando y guardando importación completa...');
+        await commitInventoryChanges(changes, currentUser, { action: 'excel_subido', description: 'Importó Excel ' + importFile.name + ' (' + changes.length + ' productos)' });
       }
 
       // Registro en auditoría y notificación
@@ -1027,7 +890,7 @@ export default function InventarioPage() {
       {/* Bootstrap 5 Responsive Toolbar */}
       <div className="row g-2 mb-3 align-items-center">
         {/* Search Bar */}
-        <div className="col-12 col-md-6 col-xl-5">
+        <div className="col-12 col-md-5 col-xl-4">
           <div className="input-group">
             <span className="input-group-text bg-dark border-secondary text-secondary">
               <i className="bi bi-search"></i>
@@ -1035,10 +898,10 @@ export default function InventarioPage() {
             <input
               type="text"
               className="form-control bg-dark border-secondary text-light"
-              placeholder="Buscar por SKU, nombre o categoría..."
+              placeholder="Buscar por medida, SKU, color..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ fontSize: '15px', minHeight: '42px' }}
+              style={{ fontSize: '14px', minHeight: '42px' }}
             />
             {search && (
               <button
@@ -1152,314 +1015,38 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* Barra de Filtro Principal: Familia de Productos y Stock */}
-      <div className="card mb-3 p-2 border-secondary" style={{ background: 'rgba(255, 255, 255, 0.03)' }}>
-        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
-          {/* Selector de Familia */}
-          <div className="d-flex align-items-center gap-1 flex-wrap">
-            <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1 me-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
-              <i className="bi bi-funnel-fill text-info"></i> Familia:
-            </span>
-
-            {/* Todos */}
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedMainType === 'all' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
-              onClick={() => {
-                setSelectedMainType('all');
-                setSelectedCategory('all');
-                setSelectedColor('all');
-              }}
-              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
-            >
-              <i className="bi bi-grid me-1"></i>
-              Todos ({mainTypeCounts.all})
-            </button>
-
-            {/* Planchas */}
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedMainType === 'planchas' ? 'btn-primary text-white fw-bold shadow' : 'btn-outline-primary text-light'}`}
-              onClick={() => {
-                setSelectedMainType('planchas');
-                setSelectedCategory('all');
-                setSelectedColor('all');
-              }}
-              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 12px', borderColor: selectedMainType === 'planchas' ? '#3b82f6' : 'rgba(59, 130, 246, 0.5)' }}
-            >
-              <i className="bi bi-layers me-1"></i>
-              Planchas ({mainTypeCounts.planchas})
-            </button>
-
-            {/* Perfiles */}
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedMainType === 'perfiles' ? 'btn-warning text-dark fw-bold shadow' : 'btn-outline-secondary text-light'}`}
-              onClick={() => {
-                setSelectedMainType('perfiles');
-                setSelectedCategory('all');
-                setSelectedColor('all');
-              }}
-              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
-            >
-              <i className="bi bi-rulers me-1"></i>
-              Perfiles ({mainTypeCounts.perfiles})
-            </button>
-
-            {/* Accesorios */}
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedMainType === 'accesorios' ? 'btn-light text-dark fw-bold shadow' : 'btn-outline-secondary text-light'}`}
-              onClick={() => {
-                setSelectedMainType('accesorios');
-                setSelectedCategory('all');
-                setSelectedColor('all');
-              }}
-              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
-            >
-              <i className="bi bi-wrench me-1"></i>
-              Accesorios ({mainTypeCounts.accesorios})
-            </button>
-
-            {/* Pinturas y Adhesivos */}
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedMainType === 'pinturas' ? 'text-light fw-bold shadow' : 'btn-outline-secondary text-light'}`}
-              onClick={() => {
-                setSelectedMainType('pinturas');
-                setSelectedCategory('all');
-                setSelectedColor('all');
-              }}
-              style={{
-                minHeight: '34px',
-                fontSize: '12px',
-                padding: '4px 10px',
-                background: selectedMainType === 'pinturas' ? '#d946ef' : 'transparent',
-                borderColor: selectedMainType === 'pinturas' ? '#d946ef' : '',
-              }}
-            >
-              <i className="bi bi-paint-bucket me-1"></i>
-              Pinturas ({mainTypeCounts.pinturas})
-            </button>
-          </div>
-
-          {/* Filtro por Estado de Stock y Limpiar */}
-          <div className="d-flex align-items-center gap-1 flex-wrap">
-            <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1 me-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
-              <i className="bi bi-speedometer2 text-secondary"></i> Stock:
-            </span>
-
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedStockStatus === 'bajo_stock' ? 'btn-warning text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
-              onClick={() => setSelectedStockStatus(selectedStockStatus === 'bajo_stock' ? 'all' : 'bajo_stock')}
-              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
-              title="Filtrar solo productos con stock bajo"
-            >
-              <i className="bi bi-exclamation-triangle-fill me-1 text-warning"></i>
-              Bajo ({stockCounts.bajo_stock})
-            </button>
-
-            <button
-              type="button"
-              className={`btn btn-sm ${selectedStockStatus === 'ignorados' ? 'btn-secondary text-light fw-bold' : 'btn-outline-secondary text-light'}`}
-              onClick={() => setSelectedStockStatus(selectedStockStatus === 'ignorados' ? 'all' : 'ignorados')}
-              style={{ minHeight: '34px', fontSize: '12px', padding: '4px 10px' }}
-              title="Filtrar solo productos ignorados de alertas de stock"
-            >
-              <i className="bi bi-eye-slash me-1"></i>
-              Ignorados ({stockCounts.ignorados})
-            </button>
-
-            {(selectedMainType !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all' || selectedCategory !== 'all') && (
-              <button
-                type="button"
-                className="btn btn-sm btn-link text-info text-decoration-none fw-semibold d-inline-flex align-items-center gap-1"
-                onClick={() => {
-                  setSelectedMainType('all');
-                  setSelectedColor('all');
-                  setSelectedStockStatus('all');
-                  setSelectedCategory('all');
-                }}
-                style={{ fontSize: '12px', padding: '4px 8px' }}
-              >
-                <i className="bi bi-x-circle"></i> Limpiar filtros
-              </button>
-            )}
+      <section className="inventory-filters" aria-label="Filtros de inventario">
+        <div className="inventory-filters-heading">
+          <div><span className="inventory-filter-eyebrow">EXPLORAR INVENTARIO</span><h2>Encuentra tu producto</h2><p>Elige el tipo, la medida y el color. Puedes combinar los filtros.</p></div>
+          {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
+        </div>
+        <div className="inventory-filter-row">
+          <div className="inventory-filter-label"><span>01</span><h3>Tipo de plancha / familia</h3></div>
+          <div className="inventory-filter-options">
+            <button type="button" className={`inventory-filter-chip ${selectedCategory === 'all' ? 'active' : ''}`} aria-pressed={selectedCategory === 'all'} onClick={() => { setSelectedCategory('all'); setSelectedLength('all'); setSelectedColor('all'); }}>Todos los tipos <small>{products.length}</small></button>
+            {categories.map((cat) => <button key={cat} type="button" className={`inventory-filter-chip ${selectedCategory === cat ? 'active' : ''}`} aria-pressed={selectedCategory === cat} onClick={() => { setSelectedCategory(cat); setSelectedLength('all'); setSelectedColor('all'); }}><i className={`bi ${getCategoryStyle(cat).icon}`} />{cat.charAt(0) + cat.slice(1).toLowerCase()}<small>{categoryCounts[cat]}</small></button>)}
           </div>
         </div>
-      </div>
-
-      {/* Sub-barra de Planchas: Tono (Clear, Opal, Bronce) y Modelos */}
-      {selectedMainType === 'planchas' && (
-        <div className="card mb-3 p-3 border-info shadow-sm" style={{ background: 'rgba(0, 212, 255, 0.04)', borderColor: 'rgba(0, 212, 255, 0.3)' }}>
-          <div className="d-flex flex-column gap-2">
-            {/* Fila 1: Tono de Plancha (Clear, Opal, Bronce) */}
-            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 pb-2 border-bottom border-secondary border-opacity-25">
-              <div className="d-flex align-items-center gap-2 flex-wrap">
-                <span className="text-info small fw-bold text-uppercase d-flex align-items-center gap-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
-                  <i className="bi bi-palette2"></i> Tono de Plancha:
-                </span>
-
-                {/* Todas las Planchas */}
-                <button
-                  type="button"
-                  className={`btn btn-sm ${selectedColor === 'all' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
-                  onClick={() => setSelectedColor('all')}
-                  style={{ minHeight: '32px', fontSize: '12px', padding: '3px 12px' }}
-                >
-                  <i className="bi bi-grid me-1"></i>
-                  Todas ({planchaColorCounts.all})
-                </button>
-
-                {/* Solo Clear */}
-                <button
-                  type="button"
-                  className="btn btn-sm fw-bold"
-                  onClick={() => setSelectedColor(selectedColor === 'clear' ? 'all' : 'clear')}
-                  style={{
-                    minHeight: '32px',
-                    fontSize: '12px',
-                    padding: '3px 12px',
-                    background: selectedColor === 'clear' ? '#00d4ff' : 'rgba(0, 212, 255, 0.08)',
-                    color: selectedColor === 'clear' ? '#0a0e17' : '#00d4ff',
-                    borderColor: '#00d4ff',
-                    borderWidth: '1px',
-                    borderStyle: 'solid',
-                    boxShadow: selectedColor === 'clear' ? '0 0 10px rgba(0, 212, 255, 0.4)' : 'none',
-                  }}
-                  title="Filtrar solo planchas Clear (Transparentes)"
-                >
-                  <i className="bi bi-droplet-half me-1"></i>
-                  Solo Clear ({planchaColorCounts.clear})
-                </button>
-
-                {/* Solo Opal */}
-                <button
-                  type="button"
-                  className="btn btn-sm fw-bold"
-                  onClick={() => setSelectedColor(selectedColor === 'opal' ? 'all' : 'opal')}
-                  style={{
-                    minHeight: '32px',
-                    fontSize: '12px',
-                    padding: '3px 12px',
-                    background: selectedColor === 'opal' ? '#f8fafc' : 'rgba(255, 255, 255, 0.08)',
-                    color: selectedColor === 'opal' ? '#0f172a' : '#f8fafc',
-                    borderColor: 'rgba(255, 255, 255, 0.6)',
-                    borderWidth: '1px',
-                    borderStyle: 'solid',
-                    boxShadow: selectedColor === 'opal' ? '0 0 10px rgba(255, 255, 255, 0.3)' : 'none',
-                  }}
-                  title="Filtrar solo planchas Opal"
-                >
-                  <i className="bi bi-circle-fill me-1" style={{ fontSize: '9px' }}></i>
-                  Solo Opal ({planchaColorCounts.opal})
-                </button>
-
-                {/* Solo Bronce */}
-                <button
-                  type="button"
-                  className="btn btn-sm fw-bold"
-                  onClick={() => setSelectedColor(selectedColor === 'bronce' ? 'all' : 'bronce')}
-                  style={{
-                    minHeight: '32px',
-                    fontSize: '12px',
-                    padding: '3px 12px',
-                    background: selectedColor === 'bronce' ? '#d97706' : 'rgba(217, 119, 6, 0.12)',
-                    color: selectedColor === 'bronce' ? '#ffffff' : '#fbbf24',
-                    borderColor: '#d97706',
-                    borderWidth: '1px',
-                    borderStyle: 'solid',
-                    boxShadow: selectedColor === 'bronce' ? '0 0 10px rgba(217, 119, 6, 0.4)' : 'none',
-                  }}
-                  title="Filtrar solo planchas Bronce"
-                >
-                  <i className="bi bi-sun-fill me-1"></i>
-                  Solo Bronce ({planchaColorCounts.bronce})
-                </button>
-              </div>
-
-              {selectedColor !== 'all' && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-link text-info text-decoration-none small p-0 d-inline-flex align-items-center gap-1"
-                  onClick={() => setSelectedColor('all')}
-                  style={{ fontSize: '11px' }}
-                >
-                  <i className="bi bi-x-circle"></i> Ver todos los tonos
-                </button>
-              )}
-            </div>
-
-            {/* Fila 2: Sub-categorías / Modelos de Planchas */}
-            <div className="d-flex align-items-center gap-1 flex-wrap pt-1">
-              <span className="text-secondary small fw-bold text-uppercase d-flex align-items-center gap-1 me-1" style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
-                <i className="bi bi-tag text-secondary"></i> Modelo:
-              </span>
-              <button
-                type="button"
-                className={`btn btn-sm ${selectedCategory === 'all' ? 'btn-outline-info text-info fw-bold' : 'btn-outline-secondary text-secondary'}`}
-                onClick={() => setSelectedCategory('all')}
-                style={{ minHeight: '28px', fontSize: '11px', padding: '2px 8px' }}
-              >
-                Todos los modelos ({planchaProducts.length})
-              </button>
-              {planchaCategories.map((cat) => {
-                const count = planchaProducts.filter((p) => (p.category || 'SIN CATEGORÍA').toUpperCase() === cat).length;
-                const isActive = selectedCategory === cat;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    className={`btn btn-sm ${isActive ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
-                    onClick={() => setSelectedCategory(isActive ? 'all' : cat)}
-                    style={{ minHeight: '28px', fontSize: '11px', padding: '2px 8px' }}
-                  >
-                    {cat} ({count})
-                  </button>
-                );
-              })}
-            </div>
+        <div className="inventory-filter-row">
+          <div className="inventory-filter-label"><span>02</span><h3>Medida / largo</h3></div>
+          <div className="inventory-filter-options">
+            <button type="button" className={`inventory-filter-chip ${selectedLength === 'all' ? 'active' : ''}`} aria-pressed={selectedLength === 'all'} onClick={() => setSelectedLength('all')}>Todas las medidas</button>
+            {lengthOptions.map((length) => <button key={length} type="button" className={`inventory-filter-chip ${selectedLength === length ? 'active' : ''}`} aria-pressed={selectedLength === length} onClick={() => setSelectedLength(length)}>{length.replace('m', ' m')}</button>)}
+            {hasUnknownLength && <button type="button" className={`inventory-filter-chip ${selectedLength === 'unknown' ? 'active' : ''}`} aria-pressed={selectedLength === 'unknown'} onClick={() => setSelectedLength('unknown')}>Sin medida</button>}
           </div>
         </div>
-      )}
-
-      {/* Selector / Chips de Categorías (solo cuando se está en 'Todos') */}
-      {selectedMainType === 'all' && categories.length > 0 && (
-        <div className="category-chips-wrapper">
-          <div className="category-chips">
-            <button
-              className={`category-chip ${selectedCategory === 'all' ? 'active' : ''}`}
-              onClick={() => setSelectedCategory('all')}
-            >
-              <i className="bi bi-grid"></i>
-              Todas las categorías
-              <span className="chip-count">{products.length}</span>
-            </button>
-            {categories.map((cat) => {
-              const style = getCategoryStyle(cat);
-              const isActive = selectedCategory === cat;
-              return (
-                <button
-                  key={cat}
-                  className={`category-chip ${isActive ? 'active' : ''}`}
-                  onClick={() => setSelectedCategory(cat)}
-                  style={isActive ? { borderColor: style.color, color: style.color } : {}}
-                >
-                  <i className={`bi ${style.icon}`} style={{ color: style.color }}></i>
-                  {cat}
-                  <span
-                    className="chip-count"
-                    style={isActive ? { background: style.bg, color: style.color } : {}}
-                  >
-                    {categoryCounts[cat] || 0}
-                  </span>
-                </button>
-              );
-            })}
+        <div className="inventory-filter-row">
+          <div className="inventory-filter-label"><span>03</span><h3>Color</h3></div>
+          <div className="inventory-filter-options">
+            <button type="button" className={`inventory-filter-chip ${selectedColor === 'all' ? 'active' : ''}`} aria-pressed={selectedColor === 'all'} onClick={() => setSelectedColor('all')}>Todos los colores</button>
+            {colorOptions.map((color) => <button key={color.value} type="button" className={`inventory-filter-chip ${selectedColor === color.value ? 'active' : ''}`} aria-pressed={selectedColor === color.value} onClick={() => setSelectedColor(color.value)}><span className={`inventory-color-swatch ${color.value}`} />{color.label}</button>)}
           </div>
         </div>
-      )}
+        <div className="inventory-filter-footer">
+          <p role="status"><strong>{filteredProducts.length}</strong> de {products.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
+          <label className="inventory-stock-filter">Stock<select value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}><option value="all">Todos</option><option value="low">Stock bajo</option><option value="zero">Sin existencias</option></select></label>
+        </div>
+      </section>
 
       {/* Contenido: Estado Vacío, Vista Agrupada o Tabla Plana */}
       {filteredProducts.length === 0 ? (
@@ -1469,30 +1056,24 @@ export default function InventarioPage() {
               <i className="bi bi-box-seam"></i>
             </div>
             <div className="empty-state-title">
-              {search || selectedMainType !== 'all' || selectedCategory !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all' ? 'Sin resultados' : 'Inventario vacío'}
+              {hasActiveFilters ? 'Sin resultados' : 'Inventario vacío'}
             </div>
             <div className="empty-state-text">
-              {search || selectedMainType !== 'all' || selectedCategory !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all'
-                ? 'No se encontraron productos con los filtros aplicados'
+              {hasActiveFilters
+                ? 'No hay productos que coincidan con los filtros seleccionados.'
                 : 'Agrega productos manualmente o importa tu archivo Excel con un clic'
               }
             </div>
-            {(search || selectedMainType !== 'all' || selectedCategory !== 'all' || selectedColor !== 'all' || selectedStockStatus !== 'all') && (
+            {hasActiveFilters && (
               <button
                 type="button"
                 className="btn btn-sm btn-outline-info mt-2"
-                onClick={() => {
-                  setSearch('');
-                  setSelectedMainType('all');
-                  setSelectedCategory('all');
-                  setSelectedColor('all');
-                  setSelectedStockStatus('all');
-                }}
+                onClick={clearFilters}
               >
-                Limpiar todos los filtros
+                <i className="bi bi-x-circle me-1"></i> Limpiar filtros
               </button>
             )}
-            {!search && selectedCategory === 'all' && (
+            {!hasActiveFilters && canEdit && (
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
                 <button className="btn btn-primary" onClick={openAddModal} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                   <i className="bi bi-plus-lg"></i> Agregar producto
@@ -1559,6 +1140,26 @@ export default function InventarioPage() {
                             <td>
                               <span>{product.name}</span>
                               {(() => {
+                                const len = detectProductLength(product);
+                                if (!len) return null;
+                                return (
+                                  <span
+                                    className="badge ms-2 font-monospace"
+                                    style={{
+                                      background: 'rgba(245, 158, 11, 0.15)',
+                                      color: '#fbbf24',
+                                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                                      fontSize: '11px',
+                                      padding: '2px 6px',
+                                    }}
+                                    title={`Largo / Medida: ${len}`}
+                                  >
+                                    <i className="bi bi-rulers me-1" style={{ fontSize: '10px' }}></i>
+                                    {len}
+                                  </span>
+                                );
+                              })()}
+                              {(() => {
                                 const col = detectProductColor(product);
                                 if (col === 'clear') {
                                   return <span className="badge ms-2" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff', fontSize: '11px', border: '1px solid rgba(0, 212, 255, 0.3)' }}><i className="bi bi-droplet-half me-1"></i>Clear</span>;
@@ -1567,7 +1168,7 @@ export default function InventarioPage() {
                                   return <span className="badge ms-2" style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#f8fafc', fontSize: '11px', border: '1px solid rgba(255, 255, 255, 0.3)' }}><i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Opal</span>;
                                 }
                                 if (col === 'bronce') {
-                                  return <span className="badge ms-2" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', fontSize: '11px', border: '1px solid rgba(217, 119, 6, 0.4)' }}><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
+                                  return <span className="badge ms-2 product-color-bronce"><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
                                 }
                                 return null;
                               })()}
@@ -1729,6 +1330,26 @@ export default function InventarioPage() {
                       <td>
                         <span>{product.name}</span>
                         {(() => {
+                          const len = detectProductLength(product);
+                          if (!len) return null;
+                          return (
+                            <span
+                              className="badge ms-2 font-monospace"
+                              style={{
+                                background: 'rgba(245, 158, 11, 0.15)',
+                                color: '#fbbf24',
+                                border: '1px solid rgba(245, 158, 11, 0.35)',
+                                fontSize: '11px',
+                                padding: '2px 6px',
+                              }}
+                              title={`Largo / Medida: ${len}`}
+                            >
+                              <i className="bi bi-rulers me-1" style={{ fontSize: '10px' }}></i>
+                              {len}
+                            </span>
+                          );
+                        })()}
+                        {(() => {
                           const col = detectProductColor(product);
                           if (col === 'clear') {
                             return <span className="badge ms-2" style={{ background: 'rgba(0, 212, 255, 0.15)', color: '#00d4ff', fontSize: '11px', border: '1px solid rgba(0, 212, 255, 0.3)' }}><i className="bi bi-droplet-half me-1"></i>Clear</span>;
@@ -1737,7 +1358,7 @@ export default function InventarioPage() {
                             return <span className="badge ms-2" style={{ background: 'rgba(255, 255, 255, 0.15)', color: '#f8fafc', fontSize: '11px', border: '1px solid rgba(255, 255, 255, 0.3)' }}><i className="bi bi-circle-fill me-1" style={{ fontSize: '8px' }}></i>Opal</span>;
                           }
                           if (col === 'bronce') {
-                            return <span className="badge ms-2" style={{ background: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', fontSize: '11px', border: '1px solid rgba(217, 119, 6, 0.4)' }}><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
+                            return <span className="badge ms-2 product-color-bronce"><i className="bi bi-sun-fill me-1"></i>Bronce</span>;
                           }
                           return null;
                         })()}

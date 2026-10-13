@@ -47,6 +47,7 @@ function AppContent({ children }) {
     '/escaner': 'Escáner',
     '/reportes': 'Reportes',
     '/historial': 'Historial de Actividad',
+    '/usuarios': 'Usuarios autorizados',
   };
 
   return (

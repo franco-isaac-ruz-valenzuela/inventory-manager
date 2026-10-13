@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, query, orderBy, limit, onSnapshot, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, startAfter, documentId } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { getActionStyle, getActionMessage } from '../../lib/auditLog';
 import { exportHistoryToExcel } from '../../lib/excelUtils';
@@ -29,21 +29,28 @@ export default function HistorialPage() {
   const [filterUser, setFilterUser] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [users, setUsers] = useState([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const cursorRef = useRef(null);
+  const requestRef = useRef(0);
+  const busyRef = useRef(false);
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'audit_log'),
-      orderBy('timestamp', 'desc'),
-      limit(300)
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+    const version = ++requestRef.current;
+    cursorRef.current = null;
+    busyRef.current = false;
+    setLoading(true);
+    setLogs([]);
+    setLoadError('');
+    const q = query(collection(db, 'audit_log'), orderBy('timestamp', 'desc'), orderBy(documentId(), 'desc'), limit(51));
+    getDocs(q).then((snapshot) => {
+        if (version !== requestRef.current) return;
         const data = [];
         const userSet = new Map();
 
-        snapshot.forEach((doc) => {
+        snapshot.docs.slice(0, 50).forEach((doc) => {
           const entry = { id: doc.id, ...doc.data() };
           data.push(entry);
 
@@ -57,16 +64,38 @@ export default function HistorialPage() {
 
         setLogs(data);
         setUsers(Array.from(userSet.values()));
+        cursorRef.current = snapshot.docs[Math.min(snapshot.size, 50) - 1] || null;
+        setHasMore(snapshot.size > 50);
         setLoading(false);
-      },
-      (error) => {
+      }).catch((error) => {
+        if (version !== requestRef.current) return;
         console.error('Error cargando historial de auditoría:', error);
+        setLoadError('No se pudo cargar el historial. Intenta actualizar.');
         setLoading(false);
-      }
-    );
+      });
+    return () => { requestRef.current += 1; };
+  }, [currentUser?.uid, refreshKey]);
 
-    return () => unsubscribe();
-  }, []);
+  const loadMore = async () => {
+    if (busyRef.current || !hasMore || !cursorRef.current) return;
+    busyRef.current = true;
+    setLoadingMore(true);
+    setLoadError('');
+    const version = requestRef.current;
+    try {
+      const snapshot = await getDocs(query(collection(db, 'audit_log'), orderBy('timestamp', 'desc'), orderBy(documentId(), 'desc'), startAfter(cursorRef.current), limit(51)));
+      if (version !== requestRef.current) return;
+      const more = snapshot.docs.slice(0, 50).map((entry) => ({ id:entry.id, ...entry.data() }));
+      setLogs((previous) => [...previous, ...more.filter((entry) => !previous.some((old) => old.id === entry.id))]);
+      setUsers((previous) => [...new Map([...previous, ...more.map((entry) => ({uid:entry.userId,name:entry.userName || entry.userEmail || 'Usuario'}))].map((user) => [user.uid,user])).values()]);
+      if (more.length) cursorRef.current = snapshot.docs[more.length - 1];
+      setHasMore(snapshot.size > 50);
+    } catch {
+      if (version === requestRef.current) setLoadError('No se pudieron cargar más registros. Puedes reintentar.');
+    } finally {
+      if (version === requestRef.current) { busyRef.current = false; setLoadingMore(false); }
+    }
+  };
 
   // Filtrar logs
   const filteredLogs = logs.filter((log) => {
@@ -87,7 +116,9 @@ export default function HistorialPage() {
         details.description?.toLowerCase().includes(s) ||
         details.notaPedido?.toLowerCase().includes(s) ||
         details.cliente?.toLowerCase().includes(s) ||
-        log.userName?.toLowerCase().includes(s)
+        log.userName?.toLowerCase().includes(s) ||
+        Object.values(log.movements || {}).some((movement) =>
+          movement.sku?.toLowerCase().includes(s) || movement.productName?.toLowerCase().includes(s))
       );
     }
     return true;
@@ -113,10 +144,12 @@ export default function HistorialPage() {
       <div className="page-header">
         <h1 className="page-title">Historial de Actividad</h1>
         <p className="page-description">
-          Registro completo de todas las acciones realizadas en el sistema
+          Consulta el historial por bloques de 50 registros. Los filtros y la exportación usan los registros cargados.
         </p>
       </div>
 
+      {loadError && <div role="alert" className="alert alert-danger">{loadError}</div>}
+      <button className="btn btn-secondary mb-3" onClick={() => setRefreshKey((key) => key + 1)} disabled={loadingMore}>Actualizar historial</button>
       {/* Toolbar */}
       <div className="toolbar">
         <div className="toolbar-group" style={{ flex: 1, flexWrap: 'wrap' }}>
@@ -228,6 +261,16 @@ export default function HistorialPage() {
                     </span>
                   </div>
                   <div className="timeline-message">{message}</div>
+                  {log.movements && Object.keys(log.movements).length > 1 && (
+                    <details style={{ marginTop: '8px' }}>
+                      <summary>{Object.keys(log.movements).length} productos en esta operación</summary>
+                      {Object.entries(log.movements).map(([id, movement]) => (
+                        <div key={id} style={{ padding: '4px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {movement.sku} · {movement.productName}: {movement.previousValue ?? 'Nuevo'} → {movement.newValue ?? 'Eliminado'}
+                        </div>
+                      ))}
+                    </details>
+                  )}
                   {log.details?.sku && (
                     <div style={{ marginTop: '6px' }}>
                       <code style={{
@@ -256,6 +299,10 @@ export default function HistorialPage() {
           })}
         </div>
       )}
+      <div className="d-flex align-items-center justify-content-between gap-3 mt-4">
+        <span className="text-secondary">{logs.length} registros cargados · {filteredLogs.length} coinciden</span>
+        {hasMore && <button className="btn btn-secondary" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Cargando…' : 'Cargar 50 anteriores'}</button>}
+      </div>
     </div>
   );
 }

@@ -3,19 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
-    "lint": "next lint"
+    "test": "node --test tests/validation.test.mjs",
+    "test:security": "firebase emulators:exec --only firestore --project demo-leker-security \"node --experimental-vm-modules --test tests/security.test.mjs\""
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
-    "@ericblade/quagga2": "^1.12.1",
-    "firebase": "^10.12.0",
+    "@ericblade/quagga2": "1.12.0",
+    "firebase": "13.0.0",
     "html5-qrcode": "^2.3.8",
-    "next": "^14.2.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "xlsx-js-style": "^1.2.0"
   },
   "allowScripts": {
@@ -23,5 +24,18 @@
     "sharp": true,
     "protobufjs@7.6.6": true,
     "sharp@0.34.5": true
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6",
+    "firebase-tools": {
+      "@opentelemetry/core": "^2.12.0",
+      "basic-ftp": "^6.2.3",
+      "uuid": "^11.1.1",
+      "chokidar": "^4.0.3"
+    }
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase-tools": "^15.33.0"
   }
 }

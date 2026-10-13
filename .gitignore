@@ -8,6 +8,10 @@
 
 # next.js
 /.next/
+/.next-production/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
 /out/
 
 # production
