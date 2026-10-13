@@ -17,6 +17,17 @@
 
 ---
 
+## Documentación del sistema
+
+La documentación completa está en [docs/README.md](docs/README.md): manual de uso,
+administración, arquitectura y datos, despliegue, operación y recuperación,
+pruebas, privacidad y ampliación nacional. Consultar también el
+[registro de cambios](CHANGELOG.md) y [seguridad](SECURITY.md).
+
+El alcance actual es el control interno de materiales de Puerto Montt: no emite
+documentos tributarios ni reemplaza la contabilidad. No hay separación por bodega
+ni respaldos automáticos configurados. Los límites operativos están documentados.
+
 ## 🌟 Características Principales
 
 ### 📦 Gestión de Inventario Completa
@@ -52,7 +63,7 @@
 * **Íconos:** [Bootstrap Icons](https://icons.getbootstrap.com/)
 * **Base de Datos & Auth:** [Google Firebase](https://firebase.google.com/) (Cloud Firestore & Authentication)
 * **Procesamiento de Archivos:** [SheetJS / XLSX](https://sheetjs.com/)
-* **Escaneo:** HTML5 Barcode Detection API
+* **Escaneo:** Componentes y librerías de cámara del proyecto, con búsqueda manual.
 
 ---
 
@@ -68,7 +79,7 @@ cd inventory-manager
 
 ### 2. Instalar dependencias
 ```bash
-npm install
+npm ci
 ```
 
 ### 3. Configurar variables de entorno
@@ -94,7 +105,10 @@ NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789012:web:abcdef123456
 npm run dev
 ```
 
-Abre [http://localhost:3000](http://localhost:3000) en tu navegador para ver la aplicación funcionando.
+El entorno usado durante esta revisión funciona con `npm.cmd run dev -- --port 3001`.
+Localhost usa el proyecto Firebase configurado; no implica una base de datos aislada.
+Consultar [instalación y despliegue](docs/DESPLIEGUE.md) para requisitos, variables,
+pruebas y publicación separada de reglas.
 
 ---
 
