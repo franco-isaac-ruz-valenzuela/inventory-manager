@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { db } from '../../lib/firebase';
+import FilterDisclosure from '../../components/FilterDisclosure';
 import {
   collection,
   query,
@@ -1016,10 +1017,7 @@ export default function InventarioPage() {
       </div>
 
       <section className="inventory-filters" aria-label="Filtros de inventario">
-        <div className="inventory-filters-heading">
-          <div><span className="inventory-filter-eyebrow">EXPLORAR INVENTARIO</span><h2>Encuentra tu producto</h2><p>Elige el tipo, la medida y el color. Puedes combinar los filtros.</p></div>
-          {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
-        </div>
+        <FilterDisclosure active={hasActiveFilters}>
         <div className="inventory-filter-row">
           <div className="inventory-filter-label"><span>01</span><h3>Tipo de plancha / familia</h3></div>
           <div className="inventory-filter-options">
@@ -1042,7 +1040,9 @@ export default function InventarioPage() {
             {colorOptions.map((color) => <button key={color.value} type="button" className={`inventory-filter-chip ${selectedColor === color.value ? 'active' : ''}`} aria-pressed={selectedColor === color.value} onClick={() => setSelectedColor(color.value)}><span className={`inventory-color-swatch ${color.value}`} />{color.label}</button>)}
           </div>
         </div>
+        </FilterDisclosure>
         <div className="inventory-filter-footer">
+          {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
           <p role="status"><strong>{filteredProducts.length}</strong> de {products.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
           <label className="inventory-stock-filter">Stock<select value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}><option value="all">Todos</option><option value="low">Stock bajo</option><option value="zero">Sin existencias</option></select></label>
         </div>

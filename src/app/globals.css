@@ -8,6 +8,14 @@
 
 .inventory-filters { margin-bottom: 24px; border: 1px solid rgba(148,163,184,.2); border-radius: 18px; background: linear-gradient(135deg, rgba(23,37,60,.8), rgba(15,15,35,.95)); overflow: hidden; }
 .inventory-filters-heading { padding: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.filter-disclosure > summary { cursor: pointer; list-style: none; }
+.filter-disclosure > summary::-webkit-details-marker { display: none; }
+.filter-disclosure > summary:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: -4px; }
+.filter-disclosure-toggle { display: inline-flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 13px; flex-shrink: 0; }
+.filter-hide-label { display: none; }
+.filter-disclosure[open] .filter-show-label { display: none; }
+.filter-disclosure[open] .filter-hide-label { display: inline; }
+.filter-disclosure[open] .filter-disclosure-toggle i { transform: rotate(180deg); }
 .inventory-filter-eyebrow { color: #67e8f9; font-size: 10px; letter-spacing: .14em; font-weight: 700; }
 .inventory-filters-heading h2 { margin: 7px 0; font-size: 20px; color: #f8fafc; }
 .inventory-filters-heading p { margin: 0; font-size: 13px; color: #94a3b8; }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { db } from '../../lib/firebase';
+import FilterDisclosure from '../../components/FilterDisclosure';
 import {
   collection,
   runTransaction,
@@ -1415,10 +1416,7 @@ export default function ConteoFisicoPage() {
             </div>
 
       <section className="inventory-filters" aria-label="Filtros de conteo físico">
-        <div className="inventory-filters-heading">
-          <div><span className="inventory-filter-eyebrow">EXPLORAR CONTEO FÍSICO</span><h2>Encuentra tu producto</h2><p>Elige el tipo, la medida y el color. Puedes combinar los filtros.</p></div>
-          {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
-        </div>
+        <FilterDisclosure active={hasActiveFilters}>
         <div className="inventory-filter-row">
           <div className="inventory-filter-label"><span>01</span><h3>Tipo de plancha / familia</h3></div>
           <div className="inventory-filter-options">
@@ -1441,7 +1439,9 @@ export default function ConteoFisicoPage() {
             {colorOptions.map((color) => <button key={color.value} type="button" className={`inventory-filter-chip ${selectedColor === color.value ? 'active' : ''}`} aria-pressed={selectedColor === color.value} onClick={() => setSelectedColor(color.value)}><span className={`inventory-color-swatch ${color.value}`} />{color.label}</button>)}
           </div>
         </div>
+        </FilterDisclosure>
         <div className="inventory-filter-footer">
+          {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
           <p role="status"><strong>{filteredItems.length}</strong> de {itemsWithDiff.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
 
         </div>
