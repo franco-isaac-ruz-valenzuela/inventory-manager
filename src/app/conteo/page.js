@@ -19,7 +19,11 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { commitInventoryChanges } from '../../lib/inventoryOperations';
 import { parseQuantity } from '../../lib/validation';
-import { savePhysicalCount } from '../../lib/physicalCountOperations';
+import {
+  savePhysicalCount,
+  resetPhysicalAuditSession,
+  keepPreviousPhysicalAuditMonth,
+} from '../../lib/physicalCountOperations';
 import { logAction } from '../../lib/auditLog';
 import { sendNotification } from '../../lib/notifications';
 import { generateDiffReport, downloadWorkbook } from '../../lib/excelUtils';
@@ -27,6 +31,7 @@ import {
   getProductMainType,
   detectProductColor,
   detectProductLength,
+  detectProductWidth,
   sortLengthKeys,
 } from '../../lib/stockRules';
 import BarcodeScanner from '../../components/BarcodeScanner';
@@ -54,6 +59,17 @@ const getCategoryStyle = (cat) => {
 };
 
 const DRAFT_STORAGE_KEY = 'leker_physical_audit_v1';
+
+function getCurrentMonthKey() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date());
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  return `${year}-${month}`;
+}
 
 function getTodaySessionName() {
   const today = new Date().toLocaleDateString('es-CL', {
@@ -116,6 +132,7 @@ export default function ConteoFisicoPage() {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedLength, setSelectedLength] = useState('all');
+  const [selectedWidth, setSelectedWidth] = useState('all');
   const [selectedColor, setSelectedColor] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all'); // all | diff | faltante | sobrante | exacto | contados | pendientes
 
@@ -135,11 +152,14 @@ export default function ConteoFisicoPage() {
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [monthActionLoading, setMonthActionLoading] = useState(false);
   const [savingSession, setSavingSession] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
-  const currentMonthKey = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  const currentMonthKey = getCurrentMonthKey(); // 'YYYY-MM' (America/Santiago)
   const [monthAlert, setMonthAlert] = useState(null);
+  const dismissedMonthKeyRef = useRef(null);
 
   // 0. Cargar borrador local inmediatamente al montar la página
   useEffect(() => {
@@ -255,10 +275,16 @@ export default function ConteoFisicoPage() {
 
         // Si el conteo en la nube pertenece a un mes anterior
         if (incomingMonth && incomingMonth !== currentMonthKey) {
-          setMonthAlert({
-            previousMonthName: incomingSessionName || 'Mes anterior',
-            draftData: data,
-          });
+          if (dismissedMonthKeyRef.current !== incomingMonth) {
+            setMonthAlert({
+              previousMonthName: incomingSessionName || 'Mes anterior',
+              previousMonthKey: incomingMonth,
+              draftData: data,
+            });
+          }
+        } else {
+          dismissedMonthKeyRef.current = null;
+          setMonthAlert(null);
         }
 
         if (incomingSessionName) setSessionName(refreshSessionName(incomingSessionName));
@@ -640,43 +666,101 @@ export default function ConteoFisicoPage() {
   };
 
   // Reiniciar todo a 0 (en local y en la nube para todos los dispositivos)
-  const handleResetAll = async () => {
-    if (!canEdit) { setFeedbackMsg('Solo un editor puede reiniciar el conteo.'); return; }
+  const resetAuditSession = async (successMessage) => {
+    if (!canEdit) { setFeedbackMsg('Solo Franco o Jefe de Bodega pueden reiniciar el conteo.'); return; }
+    if (resetting || monthActionLoading) return;
+
     Object.values(syncDebounceTimers.current).forEach(clearTimeout);
     syncDebounceTimers.current = {};
-    if (Object.values(pendingCountsRef.current).some((count) => count > 0)) {
-      setFeedbackMsg('Espera a que termine el guardado antes de reiniciar el conteo.');
-      return;
-    }
-    unsavedCountsRef.current.clear();
-    setCountedMap({});
-    setTouchedMap({});
-    setExtraProducts({});
-    countedMapRef.current = {};
-    touchedMapRef.current = {};
-    extraProductsRef.current = {};
+
+    setResetting(true);
+    setMonthActionLoading(true);
     try {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
-      const auditDocRef = doc(db, 'active_physical_audit', 'current');
-      const uName = currentUser?.displayName || currentUser?.email || 'Usuario';
-      await setDoc(auditDocRef, {
-        sessionName: getTodaySessionName(),
+      if (Object.values(pendingCountsRef.current).some((count) => count > 0)) {
+        await Promise.allSettled(Object.values(countQueuesRef.current));
+      }
+
+      const freshSessionName = getTodaySessionName();
+      await resetPhysicalAuditSession(db, currentUser, {
+        sessionName: freshSessionName,
         monthKey: currentMonthKey,
-        status: 'in_progress',
-        counts: {},
-        extraProducts: {},
-        updatedByMap: {},
-        lastUpdated: serverTimestamp(),
-        lastUpdatedBy: uName,
       });
+
+      unsavedCountsRef.current.clear();
+      cloudCountsRef.current = {};
+      countWriteBaseRef.current = {};
+      countedMapRef.current = {};
+      touchedMapRef.current = {};
+      extraProductsRef.current = {};
+      dismissedMonthKeyRef.current = null;
+
+      setCountedMap({});
+      setTouchedMap({});
+      setExtraProducts({});
+      setUpdatedByMap({});
+      setSessionName(freshSessionName);
+      setCloudSynced(true);
+      setMonthAlert(null);
+      setShowResetModal(false);
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+
+      setFeedbackMsg(successMessage);
+      setTimeout(() => setFeedbackMsg(''), 5000);
     } catch (e) {
       console.warn('Error reseteando en la nube:', e);
-      setFeedbackMsg('No se pudo reiniciar el conteo. Recarga para recuperar los datos guardados.');
+      setFeedbackMsg('No se pudo reiniciar el conteo: ' + (e?.message || 'Error de conexión o permisos.'));
+    } finally {
+      setResetting(false);
+      setMonthActionLoading(false);
+    }
+  };
+
+  const handleResetAll = () =>
+    resetAuditSession('Todo el conteo físico ha sido reiniciado a 0 en todos los dispositivos.');
+
+  const handleStartNewMonthZero = () =>
+    resetAuditSession('Iniciado nuevo conteo del mes en 0 en todos los dispositivos.');
+
+  const handleKeepPreviousMonth = async () => {
+    if (!monthAlert || monthActionLoading || resetting) return;
+    if (!canEdit) {
+      dismissedMonthKeyRef.current = monthAlert.previousMonthKey || 'dismissed';
+      setMonthAlert(null);
       return;
     }
-    setShowResetModal(false);
-    setFeedbackMsg('Todo el conteo físico ha sido reiniciado a 0 en todos los dispositivos.');
-    setTimeout(() => setFeedbackMsg(''), 5000);
+
+    setMonthActionLoading(true);
+    const draft = monthAlert.draftData || {};
+    const nextCounts = draft.counts || draft.countedMap || {};
+    const nextTouched = draft.touchedMap || {};
+    const nextExtras = draft.extraProducts || {};
+    const nextSessionName = refreshSessionName(draft.sessionName);
+
+    try {
+      await keepPreviousPhysicalAuditMonth(db, currentUser, {
+        sessionName: nextSessionName,
+        monthKey: currentMonthKey,
+      });
+
+      cloudCountsRef.current = { ...nextCounts };
+      countedMapRef.current = { ...nextCounts };
+      touchedMapRef.current = { ...nextTouched };
+      extraProductsRef.current = { ...nextExtras };
+      dismissedMonthKeyRef.current = null;
+
+      setCountedMap(nextCounts);
+      setTouchedMap(nextTouched);
+      setExtraProducts(nextExtras);
+      setSessionName(nextSessionName);
+      setMonthAlert(null);
+      setFeedbackMsg('Se mantuvo el borrador anterior para el conteo de este mes.');
+      setTimeout(() => setFeedbackMsg(''), 5000);
+    } catch (e) {
+      console.warn('Error confirmando ciclo mensual:', e);
+      setFeedbackMsg('No se pudo mantener el borrador anterior: ' + (e?.message || 'Error de conexión o permisos.'));
+    } finally {
+      setMonthActionLoading(false);
+    }
   };
 
   // Copiar todo el sistema a conteo (sincroniza en la nube)
@@ -822,11 +906,14 @@ export default function ConteoFisicoPage() {
   const categoryProducts = itemsWithDiff.filter((p) => selectedCategory === 'all' || (p.category || 'SIN CATEGORÍA').trim().toUpperCase() === selectedCategory);
   const lengthOptions = sortLengthKeys([...new Set(categoryProducts.map(detectProductLength).filter(Boolean))]);
   const hasUnknownLength = categoryProducts.some((p) => !detectProductLength(p));
-  const hasActiveFilters = Boolean(search.trim() || selectedCategory !== 'all' || selectedLength !== 'all' || selectedColor !== 'all' || statusFilter !== 'all');
+  const widthOptions = sortLengthKeys([...new Set(categoryProducts.map(detectProductWidth).filter(Boolean))]);
+  const hasUnknownWidth = categoryProducts.some((p) => !detectProductWidth(p));
+  const hasActiveFilters = Boolean(search.trim() || selectedCategory !== 'all' || selectedLength !== 'all' || selectedWidth !== 'all' || selectedColor !== 'all' || statusFilter !== 'all');
   const clearFilters = () => {
     setSearch('');
     setSelectedCategory('all');
     setSelectedLength('all');
+    setSelectedWidth('all');
     setSelectedColor('all');
     setStatusFilter('all');
   };
@@ -842,6 +929,7 @@ export default function ConteoFisicoPage() {
         if (cat !== selectedCategory) return false;
       }
       if (selectedLength !== 'all' && (detectProductLength(item) || 'unknown') !== selectedLength) return false;
+      if (selectedWidth !== 'all' && (detectProductWidth(item) || 'unknown') !== selectedWidth) return false;
       if (selectedColor !== 'all' && (item.color || detectProductColor(item) || 'otro') !== selectedColor) return false;
 
       // 2. Filtro por estado de discrepancia / conteo
@@ -868,19 +956,23 @@ export default function ConteoFisicoPage() {
         const name = (item.name || '').toLowerCase();
         const cat = (item.category || '').toLowerCase();
         const len = (detectProductLength(item) || '').toLowerCase();
+        const wid = (detectProductWidth(item) || '').toLowerCase();
         const color = (detectProductColor(item) || item.color || '').toLowerCase();
 
         const matchesAll = keywords.every((kw) => {
           const cleanKw = kw.replace(/m$/, '');
           const cleanLen = len.replace(/m$/, '');
+          const cleanWid = wid.replace(/m$/, '');
           const matchesLength = cleanLen && (cleanLen === cleanKw || len.includes(kw));
+          const matchesWidth = cleanWid && (cleanWid === cleanKw || wid.includes(kw));
 
           return (
             sku.includes(kw) ||
             name.includes(kw) ||
             cat.includes(kw) ||
             color.includes(kw) ||
-            matchesLength
+            matchesLength ||
+            matchesWidth
           );
         });
 
@@ -889,7 +981,7 @@ export default function ConteoFisicoPage() {
 
       return true;
     });
-  }, [itemsWithDiff, search, selectedCategory, selectedLength, selectedColor, statusFilter]);
+  }, [itemsWithDiff, search, selectedCategory, selectedLength, selectedWidth, selectedColor, statusFilter]);
 
   // --------------------------------------------------------------------------
   // EXPORTAR REPORTE A EXCEL
@@ -1188,34 +1280,52 @@ export default function ConteoFisicoPage() {
             </div>
           </div>
           <div className="d-flex align-items-center gap-2 flex-shrink-0">
-            <button
-              type="button"
-              className="btn btn-warning text-dark fw-bold btn-sm d-inline-flex align-items-center gap-1"
-              onClick={() => {
-                setCountedMap({});
-                setTouchedMap({});
-                setExtraProducts({});
-                setMonthAlert(null);
-                setFeedbackMsg('Iniciado nuevo conteo del mes en 0.');
-                setTimeout(() => setFeedbackMsg(''), 5000);
-              }}
-            >
-              <i className="bi bi-arrow-counterclockwise"></i>
-              <span>Iniciar Mes en 0</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary text-light btn-sm"
-              onClick={() => {
-                setCountedMap(monthAlert.draftData.counts || monthAlert.draftData.countedMap || {});
-                setTouchedMap(monthAlert.draftData.touchedMap || {});
-                if (monthAlert.draftData.extraProducts) setExtraProducts(monthAlert.draftData.extraProducts);
-                if (monthAlert.draftData.sessionName) setSessionName(refreshSessionName(monthAlert.draftData.sessionName));
-                setMonthAlert(null);
-              }}
-            >
-              Mantener Anterior
-            </button>
+            {canEdit ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-warning text-dark fw-bold btn-sm d-inline-flex align-items-center gap-1"
+                  onClick={handleStartNewMonthZero}
+                  disabled={monthActionLoading || resetting}
+                >
+                  {monthActionLoading || resetting ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                      <span>Reiniciando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-arrow-counterclockwise"></i>
+                      <span>Iniciar Mes en 0</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary text-light btn-sm"
+                  onClick={handleKeepPreviousMonth}
+                  disabled={monthActionLoading || resetting}
+                >
+                  Mantener Anterior
+                </button>
+              </>
+            ) : (
+              <div className="d-flex align-items-center gap-2 flex-wrap">
+                <span className="small text-light opacity-75">
+                  Solo Franco o Jefe de Bodega pueden reiniciar el mes en la nube.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary text-light btn-sm"
+                  onClick={() => {
+                    dismissedMonthKeyRef.current = monthAlert.previousMonthKey || 'dismissed';
+                    setMonthAlert(null);
+                  }}
+                >
+                  Cerrar aviso
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1420,8 +1530,8 @@ export default function ConteoFisicoPage() {
         <div className="inventory-filter-row">
           <div className="inventory-filter-label"><span>01</span><h3>Tipo de plancha / familia</h3></div>
           <div className="inventory-filter-options">
-            <button type="button" className={`inventory-filter-chip ${selectedCategory === 'all' ? 'active' : ''}`} aria-pressed={selectedCategory === 'all'} onClick={() => { setSelectedCategory('all'); setSelectedLength('all'); setSelectedColor('all'); }}>Todos los tipos <small>{itemsWithDiff.length}</small></button>
-            {categories.map((cat) => <button key={cat} type="button" className={`inventory-filter-chip ${selectedCategory === cat ? 'active' : ''}`} aria-pressed={selectedCategory === cat} onClick={() => { setSelectedCategory(cat); setSelectedLength('all'); setSelectedColor('all'); }}><i className={`bi ${getCategoryStyle(cat).icon}`} />{cat.charAt(0) + cat.slice(1).toLowerCase()}<small>{categoryCounts[cat]}</small></button>)}
+            <button type="button" className={`inventory-filter-chip ${selectedCategory === 'all' ? 'active' : ''}`} aria-pressed={selectedCategory === 'all'} onClick={() => { setSelectedCategory('all'); setSelectedLength('all'); setSelectedWidth('all'); setSelectedColor('all'); }}>Todos los tipos <small>{itemsWithDiff.length}</small></button>
+            {categories.map((cat) => <button key={cat} type="button" className={`inventory-filter-chip ${selectedCategory === cat ? 'active' : ''}`} aria-pressed={selectedCategory === cat} onClick={() => { setSelectedCategory(cat); setSelectedLength('all'); setSelectedWidth('all'); setSelectedColor('all'); }}><i className={`bi ${getCategoryStyle(cat).icon}`} />{cat.charAt(0) + cat.slice(1).toLowerCase()}<small>{categoryCounts[cat]}</small></button>)}
           </div>
         </div>
         <div className="inventory-filter-row">
@@ -1432,8 +1542,18 @@ export default function ConteoFisicoPage() {
             {hasUnknownLength && <button type="button" className={`inventory-filter-chip ${selectedLength === 'unknown' ? 'active' : ''}`} aria-pressed={selectedLength === 'unknown'} onClick={() => setSelectedLength('unknown')}>Sin medida</button>}
           </div>
         </div>
+        {widthOptions.length > 0 && (
+          <div className="inventory-filter-row">
+            <div className="inventory-filter-label"><span>03</span><h3>Ancho</h3></div>
+            <div className="inventory-filter-options">
+              <button type="button" className={`inventory-filter-chip ${selectedWidth === 'all' ? 'active' : ''}`} aria-pressed={selectedWidth === 'all'} onClick={() => setSelectedWidth('all')}>Todos los anchos</button>
+              {widthOptions.map((width) => <button key={width} type="button" className={`inventory-filter-chip ${selectedWidth === width ? 'active' : ''}`} aria-pressed={selectedWidth === width} onClick={() => setSelectedWidth(width)}>{width.replace('m', ' m')}</button>)}
+              {hasUnknownWidth && <button type="button" className={`inventory-filter-chip ${selectedWidth === 'unknown' ? 'active' : ''}`} aria-pressed={selectedWidth === 'unknown'} onClick={() => setSelectedWidth('unknown')}>Sin ancho</button>}
+            </div>
+          </div>
+        )}
         <div className="inventory-filter-row">
-          <div className="inventory-filter-label"><span>03</span><h3>Color</h3></div>
+          <div className="inventory-filter-label"><span>{widthOptions.length > 0 ? '04' : '03'}</span><h3>Color</h3></div>
           <div className="inventory-filter-options">
             <button type="button" className={`inventory-filter-chip ${selectedColor === 'all' ? 'active' : ''}`} aria-pressed={selectedColor === 'all'} onClick={() => setSelectedColor('all')}>Todos los colores</button>
             {colorOptions.map((color) => <button key={color.value} type="button" className={`inventory-filter-chip ${selectedColor === color.value ? 'active' : ''}`} aria-pressed={selectedColor === color.value} onClick={() => setSelectedColor(color.value)}><span className={`inventory-color-swatch ${color.value}`} />{color.label}</button>)}
@@ -1442,7 +1562,7 @@ export default function ConteoFisicoPage() {
         </FilterDisclosure>
         <div className="inventory-filter-footer">
           {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
-          <p role="status"><strong>{filteredItems.length}</strong> de {itemsWithDiff.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
+          <p role="status"><strong>{filteredItems.length}</strong> de {itemsWithDiff.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedWidth !== 'all' && <span> · Ancho {selectedWidth === 'unknown' ? 'Sin ancho' : selectedWidth.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
 
         </div>
       </section>
@@ -2315,6 +2435,7 @@ export default function ConteoFisicoPage() {
                 type="button"
                 className="btn btn-secondary"
                 onClick={() => setShowResetModal(false)}
+                disabled={resetting}
               >
                 Cancelar
               </button>
@@ -2322,8 +2443,9 @@ export default function ConteoFisicoPage() {
                 type="button"
                 className="btn btn-danger"
                 onClick={handleResetAll}
+                disabled={resetting}
               >
-                Sí, Reiniciar Todo
+                {resetting ? 'Reiniciando...' : 'Sí, Reiniciar Todo'}
               </button>
             </div>
           </div>

@@ -6,7 +6,7 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "test": "node --test tests/validation.test.mjs",
+    "test": "node --test tests/validation.test.mjs tests/quotation.test.mjs tests/sii.test.mjs tests/stockRules.test.mjs",
     "test:security": "firebase emulators:exec --only firestore --project demo-leker-security \"node --experimental-vm-modules --test tests/security.test.mjs\""
   },
   "dependencies": {

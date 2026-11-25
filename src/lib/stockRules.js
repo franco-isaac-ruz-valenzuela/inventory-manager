@@ -228,11 +228,51 @@ export function normalizeLengthString(num) {
   if (Math.abs(num - 2.9) < 0.05) return '2.90m';
   if (Math.abs(num - 2.5) < 0.05) return '2.5m';
   if (Math.abs(num - 2.44) < 0.03) return '2.44m';
-  if (Math.abs(num - 2) < 0.05) return '2.0m';
+  if (Math.abs(num - 2.1) < 0.03) return '2.10m';
+  if (Math.abs(num - 2.05) < 0.02) return '2.05m';
+  if (Math.abs(num - 2) < 0.03) return '2.0m';
   if (Math.abs(num - 1.5) < 0.05) return '1.5m';
-  if (Math.abs(num - 1) < 0.05) return '1.0m';
-  if (Math.abs(num - 0.81) < 0.05) return '0.81m';
+  if (Math.abs(num - 1.05) < 0.03) return '1.05m';
+  if (Math.abs(num - 1) < 0.04) return '1.0m';
+  if (Math.abs(num - 0.89) < 0.02) return '0.89m';
+  if (Math.abs(num - 0.81) < 0.03) return '0.81m';
+  if (Math.abs(num - 0.73) < 0.02) return '0.73m';
   return `${num % 1 === 0 ? num.toFixed(1) : num}m`;
+}
+
+/**
+ * Detecta el ancho en metros (ej: 1.05x2.90 -> '1.05m', 2.10x5.80 -> '2.10m').
+ * @param {Object} product
+ * @returns {string|null}
+ */
+export function detectProductWidth(product) {
+  if (!product) return null;
+  const name = String(product.name || '');
+  const sku = String(product.sku || '');
+  const text = `${name} ${sku}`.toUpperCase();
+
+  const cat = String(product.category || '').toUpperCase();
+  if (
+    cat.includes('PINTUR') ||
+    cat.includes('ADHESIV') ||
+    text.includes('SILICON') ||
+    text.includes('SPRAY') ||
+    text.includes('TORNILL') ||
+    text.includes('GOLILLA')
+  ) {
+    return null;
+  }
+
+  const multMatch = text.match(/(\d+(?:[.,]\d+)?)\s*[xX*]\s*(\d+(?:[.,]\d+)?)(?:\s*(?:M|MT|MTS|METROS)?)?(?!\s*MM)\b/);
+  if (multMatch) {
+    const widthVal = parseFloat(multMatch[1].replace(',', '.'));
+    const lengthVal = parseFloat(multMatch[2].replace(',', '.'));
+    if (!isNaN(widthVal) && !isNaN(lengthVal) && widthVal >= 0.5 && widthVal <= 5 && lengthVal >= 0.5 && lengthVal <= 20) {
+      return normalizeLengthString(widthVal);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -282,6 +322,7 @@ export function detectProductLength(product) {
   if (/\b2[.,]44\b/.test(text)) return '2.44m';
   if (/\b2[.,]50?\b(?!\s*MM)/.test(text)) return '2.5m';
   if (/\b1[.,]50?\b(?!\s*MM)/.test(text)) return '1.5m';
+  if (/\b1[.,]05(?:\s*(?:M|MT|MTS|METROS))?\b(?!\s*MM)/.test(text)) return '1.05m';
 
   // 3. Patrones con unidad explícita de metros (MT, MTS, METROS) pero NO MM
   const unitMatch = text.match(/\b(\d+(?:[.,]\d+)?)\s*(?:MT|MTS|METROS)\b/);

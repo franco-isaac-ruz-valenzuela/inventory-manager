@@ -1,0 +1,58 @@
+.quotation-card { padding: 24px; margin-bottom: 20px; }
+.quotation-card h2 { margin-bottom: 16px; }
+.quotation-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+.quotation-hint { color: var(--text-secondary); font-size: 13px; margin: 12px 0; }
+.quotation-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; align-items: stretch; }
+.quotation-search-wrap { position: relative; flex: 1.2; min-width: 220px; }
+.quotation-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--bg-card, #111827);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+}
+.quotation-search-option {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #f0f0f5);
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.quotation-search-option:last-child { border-bottom: 0; }
+.quotation-search-option:hover { background: rgba(0, 212, 255, 0.1); }
+.quotation-search-option small { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quotation-actions select { flex: 1; min-width: 180px; }
+.quotation-code-input { font-family: var(--font-mono, monospace); font-weight: 700; }
+.quotation-subinput { margin-top: 6px; font-size: 12px; color: var(--text-secondary); padding: 6px 10px; }
+.quotation-totals { text-align: right; margin: 24px 0; }
+.quotation-page textarea { resize: vertical; }
+.quotation-page td { min-width: 120px; vertical-align: top; }
+.quotation-page td:first-child { min-width: 240px; }
+@media (max-width: 640px) { .quotation-grid { grid-template-columns: 1fr; gap: 0; } .quotation-card { padding: 16px; } }
+@media print {
+  body:has(.quotation-page) { background: white !important; color: black !important; }
+  body:has(.quotation-page) .sidebar, body:has(.quotation-page) .sidebar-overlay, body:has(.quotation-page) .topbar, .quotation-controls { display: none !important; }
+  body:has(.quotation-page) .main-content { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+  .quotation-page { color: black; }
+  .quotation-page .card, .quotation-page .form-input, .quotation-page table, .quotation-page th, .quotation-page td { background: white !important; color: black !important; box-shadow: none !important; }
+  .quotation-page .form-input { border: 0; padding: 4px 0; }
+  .quotation-subinput { margin-top: 2px; color: #444 !important; }
+  .quotation-subinput:placeholder-shown { display: none !important; }
+  .quotation-page textarea { field-sizing: content; height: auto; }
+  .quotation-hint { color: #444; }
+  .quotation-page tr, .quotation-totals { break-inside: avoid; }
+}

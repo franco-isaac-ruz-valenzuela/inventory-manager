@@ -160,3 +160,22 @@ test('viewers can count one product, but cannot clear or replace the shared sess
   await assertFails(updateDoc(doc(viewerDb(),'active_physical_audit/current'),{'counts.p1':'invalid',lastUpdated:serverTimestamp()}));
   await assertFails(updateDoc(doc(viewerDb(),'active_physical_audit/current'),{counts:{},lastUpdated:serverTimestamp()}));
 });
+test('editors can reset or roll forward the monthly audit session, while viewers cannot', async () => {
+  await seed({'active_physical_audit/current':{sessionName:'Conteo Físico Bodega — 19 de octubre de 2026',monthKey:'2026-10',counts:{p1:12},extraProducts:{extra_1:{id:'extra_1',sku:'X1'}},updatedByMap:{p1:{userName:'Franco'}},lastUpdated:new Date()}});
+  const viewerOps = await library('src/lib/physicalCountOperations.js');
+  await assert.rejects(viewerOps.resetPhysicalAuditSession(viewerDb(), {uid:'viewer',email:'viewer@example.com'}, {sessionName:'Nuevo',monthKey:'2026-11'}));
+  await assert.rejects(viewerOps.keepPreviousPhysicalAuditMonth(viewerDb(), {uid:'viewer',email:'viewer@example.com'}, {sessionName:'Nuevo',monthKey:'2026-11'}));
+
+  const editorOps = await library('src/lib/physicalCountOperations.js');
+  await editorOps.keepPreviousPhysicalAuditMonth(userDb(), editor, {sessionName:'Conteo Físico Bodega — 25 de noviembre de 2026',monthKey:'2026-11'});
+  let snap = (await getDoc(doc(userDb(),'active_physical_audit/current'))).data();
+  assert.equal(snap.monthKey, '2026-11');
+  assert.equal(snap.counts.p1, 12);
+
+  await editorOps.resetPhysicalAuditSession(userDb(), editor, {sessionName:'Conteo Físico Bodega — 25 de noviembre de 2026',monthKey:'2026-11'});
+  snap = (await getDoc(doc(userDb(),'active_physical_audit/current'))).data();
+  assert.equal(snap.monthKey, '2026-11');
+  assert.deepEqual(snap.counts, {});
+  assert.deepEqual(snap.extraProducts, {});
+  assert.deepEqual(snap.updatedByMap, {});
+});

@@ -42,6 +42,7 @@ function AppContent({ children }) {
   const pageTitles = {
     '/': 'Dashboard',
     '/inventario': 'Inventario',
+    '/cotizador': 'Cotizador',
     '/conteo': 'Conteo Físico',
     '/comparar': 'Comparar Excel',
     '/escaner': 'Escáner',

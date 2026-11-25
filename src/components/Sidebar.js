@@ -8,6 +8,7 @@ const navItems = [
   { label: 'Navegación', type: 'section' },
   { href: '/', icon: 'bi bi-grid-1x2', label: 'Dashboard' },
   { href: '/inventario', icon: 'bi bi-box-seam', label: 'Inventario' },
+  { href: '/cotizador', icon: 'bi bi-calculator', label: 'Cotizador' },
   { href: '/conteo', icon: 'bi bi-clipboard2-check', label: 'Conteo Físico' },
   { href: '/comparar', icon: 'bi bi-file-earmark-diff', label: 'Comparar Excel' },
   { href: '/escaner', icon: 'bi bi-camera', label: 'Escáner' },

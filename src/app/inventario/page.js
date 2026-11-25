@@ -28,7 +28,7 @@ import {
   normalizeData,
   consolidateDuplicates,
 } from '../../lib/excelUtils';
-import { isLowStock, getLowStockThreshold, isProductIgnoredFromStock, detectProductLength, sortLengthKeys } from '../../lib/stockRules';
+import { isLowStock, getLowStockThreshold, isProductIgnoredFromStock, detectProductLength, detectProductWidth, sortLengthKeys } from '../../lib/stockRules';
 
 export default function InventarioPage() {
   const { currentUser, canEdit } = useAuth();
@@ -37,6 +37,7 @@ export default function InventarioPage() {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedLength, setSelectedLength] = useState('all');
+  const [selectedWidth, setSelectedWidth] = useState('all');
   const [selectedColor, setSelectedColor] = useState('all');
   const [stockFilter, setStockFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
@@ -162,11 +163,14 @@ export default function InventarioPage() {
   const categoryProducts = products.filter((p) => selectedCategory === 'all' || (p.category || 'SIN CATEGORÍA').trim().toUpperCase() === selectedCategory);
   const lengthOptions = sortLengthKeys([...new Set(categoryProducts.map(detectProductLength).filter(Boolean))]);
   const hasUnknownLength = categoryProducts.some((p) => !detectProductLength(p));
-  const hasActiveFilters = Boolean(search.trim() || selectedCategory !== 'all' || selectedLength !== 'all' || selectedColor !== 'all' || stockFilter !== 'all');
+  const widthOptions = sortLengthKeys([...new Set(categoryProducts.map(detectProductWidth).filter(Boolean))]);
+  const hasUnknownWidth = categoryProducts.some((p) => !detectProductWidth(p));
+  const hasActiveFilters = Boolean(search.trim() || selectedCategory !== 'all' || selectedLength !== 'all' || selectedWidth !== 'all' || selectedColor !== 'all' || stockFilter !== 'all');
   const clearFilters = () => {
     setSearch('');
     setSelectedCategory('all');
     setSelectedLength('all');
+    setSelectedWidth('all');
     setSelectedColor('all');
     setStockFilter('all');
   };
@@ -182,6 +186,7 @@ export default function InventarioPage() {
     }
 
     if (selectedLength !== 'all' && (detectProductLength(p) || 'unknown') !== selectedLength) return false;
+    if (selectedWidth !== 'all' && (detectProductWidth(p) || 'unknown') !== selectedWidth) return false;
     if (selectedColor !== 'all' && detectProductColor(p) !== selectedColor) return false;
     if (stockFilter === 'low' && !isLowStock(p)) return false;
     if (stockFilter === 'zero' && Number(p.quantity) !== 0) return false;
@@ -201,20 +206,24 @@ export default function InventarioPage() {
     const name = (p.name || '').toLowerCase();
     const cat = (p.category || 'SIN CATEGORÍA').toLowerCase();
     const len = (detectProductLength(p) || '').toLowerCase();
+    const wid = (detectProductWidth(p) || '').toLowerCase();
     const color = (detectProductColor(p) || '').toLowerCase();
 
     return keywords.every((kw) => {
       // Si la búsqueda coincide con una medida (ej: "5.80", "5.80m", "5.8", "3.66", "8.70", "2.5")
       const cleanKw = kw.replace(/m$/, '');
       const cleanLen = len.replace(/m$/, '');
+      const cleanWid = wid.replace(/m$/, '');
       const matchesLength = cleanLen && (cleanLen === cleanKw || len.includes(kw));
+      const matchesWidth = cleanWid && (cleanWid === cleanKw || wid.includes(kw));
 
       return (
         sku.includes(kw) ||
         name.includes(kw) ||
         cat.includes(kw) ||
         color.includes(kw) ||
-        matchesLength
+        matchesLength ||
+        matchesWidth
       );
     });
   });
@@ -224,6 +233,8 @@ export default function InventarioPage() {
     if (categoryOrder) return categoryOrder;
     const lengthOrder = (parseFloat(detectProductLength(a)) || Infinity) - (parseFloat(detectProductLength(b)) || Infinity);
     if (lengthOrder && !Number.isNaN(lengthOrder)) return lengthOrder;
+    const widthOrder = (parseFloat(detectProductWidth(a)) || Infinity) - (parseFloat(detectProductWidth(b)) || Infinity);
+    if (widthOrder && !Number.isNaN(widthOrder)) return widthOrder;
     const colorOrder = ['opal', 'bronce', 'clear', 'otro'];
     return colorOrder.indexOf(detectProductColor(a)) - colorOrder.indexOf(detectProductColor(b)) || (a.name || '').localeCompare(b.name || '', 'es', { numeric: true });
   });
@@ -1021,8 +1032,8 @@ export default function InventarioPage() {
         <div className="inventory-filter-row">
           <div className="inventory-filter-label"><span>01</span><h3>Tipo de plancha / familia</h3></div>
           <div className="inventory-filter-options">
-            <button type="button" className={`inventory-filter-chip ${selectedCategory === 'all' ? 'active' : ''}`} aria-pressed={selectedCategory === 'all'} onClick={() => { setSelectedCategory('all'); setSelectedLength('all'); setSelectedColor('all'); }}>Todos los tipos <small>{products.length}</small></button>
-            {categories.map((cat) => <button key={cat} type="button" className={`inventory-filter-chip ${selectedCategory === cat ? 'active' : ''}`} aria-pressed={selectedCategory === cat} onClick={() => { setSelectedCategory(cat); setSelectedLength('all'); setSelectedColor('all'); }}><i className={`bi ${getCategoryStyle(cat).icon}`} />{cat.charAt(0) + cat.slice(1).toLowerCase()}<small>{categoryCounts[cat]}</small></button>)}
+            <button type="button" className={`inventory-filter-chip ${selectedCategory === 'all' ? 'active' : ''}`} aria-pressed={selectedCategory === 'all'} onClick={() => { setSelectedCategory('all'); setSelectedLength('all'); setSelectedWidth('all'); setSelectedColor('all'); }}>Todos los tipos <small>{products.length}</small></button>
+            {categories.map((cat) => <button key={cat} type="button" className={`inventory-filter-chip ${selectedCategory === cat ? 'active' : ''}`} aria-pressed={selectedCategory === cat} onClick={() => { setSelectedCategory(cat); setSelectedLength('all'); setSelectedWidth('all'); setSelectedColor('all'); }}><i className={`bi ${getCategoryStyle(cat).icon}`} />{cat.charAt(0) + cat.slice(1).toLowerCase()}<small>{categoryCounts[cat]}</small></button>)}
           </div>
         </div>
         <div className="inventory-filter-row">
@@ -1033,8 +1044,18 @@ export default function InventarioPage() {
             {hasUnknownLength && <button type="button" className={`inventory-filter-chip ${selectedLength === 'unknown' ? 'active' : ''}`} aria-pressed={selectedLength === 'unknown'} onClick={() => setSelectedLength('unknown')}>Sin medida</button>}
           </div>
         </div>
+        {widthOptions.length > 0 && (
+          <div className="inventory-filter-row">
+            <div className="inventory-filter-label"><span>03</span><h3>Ancho</h3></div>
+            <div className="inventory-filter-options">
+              <button type="button" className={`inventory-filter-chip ${selectedWidth === 'all' ? 'active' : ''}`} aria-pressed={selectedWidth === 'all'} onClick={() => setSelectedWidth('all')}>Todos los anchos</button>
+              {widthOptions.map((width) => <button key={width} type="button" className={`inventory-filter-chip ${selectedWidth === width ? 'active' : ''}`} aria-pressed={selectedWidth === width} onClick={() => setSelectedWidth(width)}>{width.replace('m', ' m')}</button>)}
+              {hasUnknownWidth && <button type="button" className={`inventory-filter-chip ${selectedWidth === 'unknown' ? 'active' : ''}`} aria-pressed={selectedWidth === 'unknown'} onClick={() => setSelectedWidth('unknown')}>Sin ancho</button>}
+            </div>
+          </div>
+        )}
         <div className="inventory-filter-row">
-          <div className="inventory-filter-label"><span>03</span><h3>Color</h3></div>
+          <div className="inventory-filter-label"><span>{widthOptions.length > 0 ? '04' : '03'}</span><h3>Color</h3></div>
           <div className="inventory-filter-options">
             <button type="button" className={`inventory-filter-chip ${selectedColor === 'all' ? 'active' : ''}`} aria-pressed={selectedColor === 'all'} onClick={() => setSelectedColor('all')}>Todos los colores</button>
             {colorOptions.map((color) => <button key={color.value} type="button" className={`inventory-filter-chip ${selectedColor === color.value ? 'active' : ''}`} aria-pressed={selectedColor === color.value} onClick={() => setSelectedColor(color.value)}><span className={`inventory-color-swatch ${color.value}`} />{color.label}</button>)}
@@ -1043,7 +1064,7 @@ export default function InventarioPage() {
         </FilterDisclosure>
         <div className="inventory-filter-footer">
           {hasActiveFilters && <button type="button" className="btn btn-sm btn-secondary" onClick={clearFilters}><i className="bi bi-x-circle me-2" />Limpiar filtros</button>}
-          <p role="status"><strong>{filteredProducts.length}</strong> de {products.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
+          <p role="status"><strong>{filteredProducts.length}</strong> de {products.length} productos{selectedCategory !== 'all' && <span> · {selectedCategory}</span>}{selectedLength !== 'all' && <span> · {selectedLength === 'unknown' ? 'Sin medida' : selectedLength.replace('m', ' m')}</span>}{selectedWidth !== 'all' && <span> · Ancho {selectedWidth === 'unknown' ? 'Sin ancho' : selectedWidth.replace('m', ' m')}</span>}{selectedColor !== 'all' && <span> · {colorOptions.find((c) => c.value === selectedColor)?.label}</span>}</p>
           <label className="inventory-stock-filter">Stock<select value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}><option value="all">Todos</option><option value="low">Stock bajo</option><option value="zero">Sin existencias</option></select></label>
         </div>
       </section>
