@@ -117,6 +117,15 @@ service cloud.firestore {
           validCountUpdate()));
       allow delete: if false;
     }
+    match /quotations/{quoteId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() &&
+        request.resource.data.quoteNumber is string &&
+        request.resource.data.quoteNumber.size() > 0 &&
+        request.resource.data.quoteNumber.size() <= 40 &&
+        request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if signedIn();
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }
